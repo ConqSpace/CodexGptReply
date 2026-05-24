@@ -1,0 +1,15 @@
+{
+  "name": "codex-gpt-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack Web API로 GPT와 Codex 사이의 1단계 왕복 검증을 수행하는 로컬 relay daemon입니다.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/relay_daemon.js",
+    "once": "node src/relay_daemon.js --once",
+    "dry-run": "node src/relay_daemon.js --dry-run --once"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
