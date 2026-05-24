@@ -125,6 +125,43 @@ Slack 왕복 검증용 고정 응답입니다.
 - [docs/product_plan.md](docs/product_plan.md)
 - [docs/roadmap.md](docs/roadmap.md)
 
+## Codex Skill
+
+이 레포에는 Codex에서 바로 사용할 수 있는 skill도 포함되어 있습니다.
+
+```text
+skills/codex-gpt-relay/
+  SKILL.md
+  agents/openai.yaml
+```
+
+설치하려면 레포의 skill 폴더를 Codex skill 디렉터리로 복사합니다.
+
+```powershell
+Copy-Item `
+  -Recurse `
+  -Force `
+  -LiteralPath .\skills\codex-gpt-relay `
+  -Destination "$env:USERPROFILE\.codex\skills\codex-gpt-relay"
+```
+
+skill은 두 가지 모드를 제공합니다.
+
+- **Short Task Mode**: 1회 relay 확인, `--dry-run`, `--once`, 문법 검사, 결과 요약
+- **Long Monitoring Mode**: 데몬 로그를 라이브 서버 로그처럼 확인하고 새 작업 이벤트를 추적
+
+예시 요청:
+
+```text
+Use $codex-gpt-relay to check the CodexGptRelay Slack relay status.
+```
+
+또는 한국어로:
+
+```text
+$codex-gpt-relay로 relay 한 번 확인해줘.
+```
+
 ## 현재 한계
 
 - 1단계는 Slack 왕복 검증만 수행합니다.

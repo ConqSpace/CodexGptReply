@@ -1,0 +1,7 @@
+interface:
+  display_name: "Codex GPT Relay"
+  short_description: "Slack으로 GPT와 Codex 작업을 중계합니다"
+  default_prompt: "Use $codex-gpt-relay to check the CodexGptRelay Slack relay status and handle any pending short task."
+
+policy:
+  allow_implicit_invocation: true
