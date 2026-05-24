@@ -63,6 +63,12 @@ function loadConfig() {
     slackHistoryLimit: readNumber(mergedEnv.SLACK_HISTORY_LIMIT, 20),
     logFilePath: path.join(PROJECT_ROOT, "logs", "relay_events.jsonl"),
     processedMessagesPath: path.join(PROJECT_ROOT, "state", "processed_messages.json"),
+    postedResultsPath: path.join(PROJECT_ROOT, "state", "posted_results.json"),
+    inboxDir: path.join(PROJECT_ROOT, "inbox"),
+    outboxDir: path.join(PROJECT_ROOT, "outbox"),
+    sentOutboxDir: path.join(PROJECT_ROOT, "outbox", "sent"),
+    logsDir: path.join(PROJECT_ROOT, "logs"),
+    stateDir: path.join(PROJECT_ROOT, "state"),
   };
 }
 

@@ -101,10 +101,21 @@ Checklist:
    - identify `ts`, `thread_ts`, `task_id` if present
    - read the request
    - decide whether it is safe to answer, needs user confirmation, or should be ignored
+   - 결과를 준비할 때 `templates/outbox_result.pending.md`를 `outbox/<task_id>.pending.md`로 복사한다.
+   - 작성 중에는 `.pending.md`로 유지하고, relay daemon이 전송해도 될 때만 `.md`로 이름을 바꾼다.
 6. For results, use one of these prefixes:
    - `[codex-result]`
    - `[codex-question]`
    - `[codex-status]`
+
+파일 큐 운영:
+
+- `inbox`와 `outbox` 작업을 처리하기 전에 `docs/codex_app_operations.md`를 읽는다.
+- 새 작업의 기준 자료는 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`로 본다.
+- 모든 `outbox` 결과 파일에는 `inbox` 작업 파일의 `thread_ts`를 그대로 복사한다.
+- `outbox` 필수 필드는 `task_id`, `status`, `thread_ts`, `message`이다.
+- 위험하거나 불명확한 작업은 `status: waiting_for_user`를 사용해 daemon이 `[codex-question]`으로 답하게 한다.
+- 결과가 완성되고 전송해도 안전하다고 판단하기 전에는 최종 `outbox/*.md` 파일을 만들지 않는다.
 
 Stop or ask the user when:
 
@@ -179,4 +190,3 @@ GitHub repository:
 ```text
 https://github.com/ConqSpace/CodexGptReply
 ```
-

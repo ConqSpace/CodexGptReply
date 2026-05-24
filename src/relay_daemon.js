@@ -1,6 +1,11 @@
 const { loadConfig } = require("./config");
 const { SlackClient, sleep } = require("./slack_client");
-const { ProcessedMessageStore, appendJsonLine, ensureDirectory } = require("./state_store");
+const { ProcessedMessageStore, PostedResultStore, appendJsonLine } = require("./state_store");
+const {
+  createInboxTaskFile,
+  ensureRelayDirectories,
+  processOutboxResults,
+} = require("./file_queue");
 
 const TO_CODEX_PREFIX = "[to-codex]";
 const CODEX_RESULT_PREFIX = "[codex-result]";
@@ -49,9 +54,11 @@ function isToCodexMessage(message) {
 }
 
 function buildEventRecord({ channelId, message, dryRun }) {
+  const detectedAt = new Date().toISOString();
+
   return {
     event: "to_codex_message_detected",
-    detected_at: new Date().toISOString(),
+    detected_at: detectedAt,
     channel: channelId,
     ts: message.ts,
     author: message.user || message.bot_id || "unknown",
@@ -59,6 +66,20 @@ function buildEventRecord({ channelId, message, dryRun }) {
     thread_ts: message.thread_ts || message.ts,
     is_thread_parent: !message.thread_ts || message.thread_ts === message.ts,
     dry_run: dryRun,
+  };
+}
+
+function buildTaskCreatedEvent({ eventRecord, taskFile }) {
+  return {
+    event: "task_created",
+    detected_at: eventRecord.detected_at,
+    task_id: taskFile.taskId,
+    task_file: taskFile.fileName,
+    task_file_created: taskFile.created,
+    channel: eventRecord.channel,
+    message_ts: eventRecord.ts,
+    thread_ts: eventRecord.thread_ts,
+    author: eventRecord.author,
   };
 }
 
@@ -100,22 +121,19 @@ async function processMessages({ config, slackClient, processedStore, options })
     });
     appendJsonLine(config.logFilePath, eventRecord);
 
-    const threadTs = message.thread_ts || message.ts;
-    const replyText = buildFixedReply(message);
+    const taskFile = createInboxTaskFile({
+      config,
+      channelId: config.slackChannelId,
+      message,
+      detectedAt: eventRecord.detected_at,
+    });
+    appendJsonLine(config.logFilePath, buildTaskCreatedEvent({ eventRecord, taskFile }));
 
-    if (options.dryRun) {
-      console.log(`[dry-run] Slack 답장 생략: thread_ts=${threadTs}`);
-    } else {
-      await slackClient.postThreadReply({
-        channelId: config.slackChannelId,
-        threadTs,
-        text: replyText,
-      });
-    }
+    const threadTs = message.thread_ts || message.ts;
 
     processedStore.add(message.ts);
     processedCount += 1;
-    console.log(`처리 완료: ts=${message.ts}, thread_ts=${threadTs}`);
+    console.log(`작업 파일 생성 완료: task_id=${taskFile.taskId}, ts=${message.ts}, thread_ts=${threadTs}`);
   }
 
   return processedCount;
@@ -129,11 +147,11 @@ async function main() {
   }
 
   const config = loadConfig();
-  ensureDirectory(`${config.projectRoot}\\logs`);
-  ensureDirectory(`${config.projectRoot}\\state`);
+  ensureRelayDirectories(config);
 
   const slackClient = new SlackClient({ token: config.slackBotToken });
   const processedStore = new ProcessedMessageStore(config.processedMessagesPath);
+  const postedStore = new PostedResultStore(config.postedResultsPath);
 
   console.log(`CodexGptRelay 시작: channel=${config.slackChannelId}, interval=${config.pollIntervalMs}ms, dryRun=${options.dryRun}`);
 
@@ -145,8 +163,14 @@ async function main() {
         processedStore,
         options,
       });
+      const postedCount = await processOutboxResults({
+        config,
+        slackClient,
+        postedStore,
+        options,
+      });
 
-      console.log(`이번 조회 처리 수: ${processedCount}`);
+      console.log(`이번 조회 작업 생성 수: ${processedCount}, 결과 전송 수: ${postedCount}`);
     } catch (error) {
       console.error(`조회 실패: ${error.message}`);
     }
@@ -170,4 +194,5 @@ module.exports = {
   processMessages,
   isToCodexMessage,
   buildFixedReply,
+  buildTaskCreatedEvent,
 };

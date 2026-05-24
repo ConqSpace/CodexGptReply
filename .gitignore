@@ -1,4 +1,6 @@
 .env
 logs/
 state/
+inbox/
+outbox/
 node_modules/

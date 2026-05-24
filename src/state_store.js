@@ -55,6 +55,33 @@ class ProcessedMessageStore {
   }
 }
 
+class PostedResultStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+    this.state = readJsonFile(filePath, { posted_files: [] });
+
+    if (!Array.isArray(this.state.posted_files)) {
+      this.state.posted_files = [];
+    }
+
+    this.postedSet = new Set(this.state.posted_files);
+  }
+
+  has(fileName) {
+    return this.postedSet.has(fileName);
+  }
+
+  add(fileName) {
+    if (this.postedSet.has(fileName)) {
+      return;
+    }
+
+    this.postedSet.add(fileName);
+    this.state.posted_files = Array.from(this.postedSet).sort();
+    writeJsonFileAtomic(this.filePath, this.state);
+  }
+}
+
 function appendJsonLine(filePath, value) {
   ensureDirectory(path.dirname(filePath));
   fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, "utf8");
@@ -62,6 +89,9 @@ function appendJsonLine(filePath, value) {
 
 module.exports = {
   ProcessedMessageStore,
+  PostedResultStore,
   appendJsonLine,
   ensureDirectory,
+  readJsonFile,
+  writeJsonFileAtomic,
 };

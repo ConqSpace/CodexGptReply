@@ -36,7 +36,7 @@ node src/relay_daemon.js --once --dry-run
 node src/relay_daemon.js --once
 ```
 
-한 번만 Slack 메시지를 읽고, `[to-codex]` 메시지에 같은 스레드로 `[codex-result]` 고정 응답을 전송합니다.
+한 번만 Slack 메시지를 읽고, `[to-codex]` 메시지를 `inbox` 작업 파일로 변환합니다. 처리할 `outbox/*.md` 결과 파일이 있으면 같은 Slack 스레드에 답장을 전송합니다.
 
 ```powershell
 node src/relay_daemon.js
@@ -46,11 +46,55 @@ node src/relay_daemon.js
 
 ## 생성되는 로컬 파일
 
-- `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지의 `ts`, 작성자, 본문, 스레드 정보를 줄 단위 JSON으로 저장합니다.
+- `inbox/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋은 작업 파일로 저장합니다.
+- `outbox/*.md`: Slack 스레드에 전송할 결과 파일입니다.
+- `outbox/*.pending.md`: 작성 중인 결과 파일입니다. 데몬은 이 파일을 무시합니다.
+- `outbox/sent/*.md`: Slack 전송 성공 뒤 이동된 결과 파일입니다.
+- `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지와 `task_created` 이벤트를 줄 단위 JSON으로 저장합니다.
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts`를 저장해 중복 처리를 막습니다.
+- `state/posted_results.json`: 이미 Slack에 전송한 결과 파일명을 저장해 중복 전송을 막습니다.
+
+## 파일 큐 사용법
+
+Slack 요청에는 `task_id`를 넣을 수 있습니다. `task_id`가 없으면 데몬이 Slack 메시지 `ts`를 바탕으로 안전한 값을 만듭니다.
+
+```text
+[to-codex]
+task_id: test-001
+
+request:
+README의 2단계 파일 큐 설명을 확인해줘.
+```
+
+작업 파일에는 최소한 `channel`, `message_ts`, `thread_ts`, `author`, `detected_at`, 원문 `request`가 들어갑니다.
+
+결과 파일은 먼저 `.pending.md`로 작성한 뒤, 완성되면 `.md`로 이름을 바꿉니다.
+
+```text
+task_id: test-001
+status: completed
+thread_ts: 1710000000.000000
+message: |
+  요청한 작업을 완료했습니다.
+```
+
+frontmatter를 쓰는 경우 본문을 `message`로 사용할 수 있습니다.
+
+```markdown
+---
+task_id: test-001
+status: completed
+thread_ts: "1710000000.000000"
+---
+
+요청한 작업을 완료했습니다.
+```
+
+`status`가 `waiting_for_user`이면 `[codex-question]`, `running`이면 `[codex-status]`, 그 외에는 `[codex-result]` 접두사로 전송됩니다.
 
 ## 메시지 처리 규칙
 
 - 본문이 `[to-codex]`로 시작하는 메시지만 처리합니다.
 - `[codex-result]`, `[codex-question]`, `[codex-status]` 메시지는 접두사가 다르므로 무시됩니다.
-- `--dry-run`에서도 로그와 처리 상태는 저장됩니다. 같은 메시지를 실제 전송으로 다시 검증하려면 해당 `ts`를 상태 파일에서 제거해야 합니다.
+- `--dry-run`에서도 작업 파일, 로그, 처리 상태는 저장됩니다. Slack 전송과 `outbox/sent` 이동은 하지 않습니다.
+- 같은 메시지를 실제 전송으로 다시 검증하려면 해당 `ts`를 상태 파일에서 제거해야 합니다.
