@@ -1,6 +1,6 @@
 const { loadConfig } = require("./config");
 const { SlackClient, sleep } = require("./slack_client");
-const { ProcessedMessageStore, PostedResultStore, appendJsonLine } = require("./state_store");
+const { ProcessedMessageStore, PostedResultStore, TaskStore, appendJsonLine } = require("./state_store");
 const {
   createInboxTaskFile,
   ensureRelayDirectories,
@@ -14,6 +14,7 @@ function parseArguments(argv) {
   const options = {
     dryRun: false,
     once: false,
+    status: false,
   };
 
   for (const argument of argv) {
@@ -24,6 +25,11 @@ function parseArguments(argv) {
 
     if (argument === "--once") {
       options.once = true;
+      continue;
+    }
+
+    if (argument === "--status") {
+      options.status = true;
       continue;
     }
 
@@ -41,10 +47,12 @@ function parseArguments(argv) {
 function printHelp() {
   console.log(`사용법:
   node src/relay_daemon.js [--dry-run] [--once]
+  node src/relay_daemon.js --status
 
 옵션:
   --dry-run  Slack 답장 전송을 건너뛰고 로그와 상태 저장만 수행합니다.
   --once     conversations.history를 한 번만 조회하고 종료합니다.
+  --status   최근 작업 상태를 출력하고 종료합니다.
 `);
 }
 
@@ -100,7 +108,35 @@ details:
 needs_user: false`;
 }
 
-async function processMessages({ config, slackClient, processedStore, options }) {
+function printStatus({ taskStore, processedStore, postedStore }) {
+  const recentTasks = taskStore.listRecent(10);
+
+  console.log("CodexGptRelay 최근 작업 상태");
+  console.log(`처리한 Slack 메시지 수: ${processedStore.count()}`);
+  console.log(`전송 완료 결과 파일 수: ${postedStore.count()}`);
+
+  if (recentTasks.length === 0) {
+    console.log("최근 작업이 없습니다.");
+    return;
+  }
+
+  for (const task of recentTasks) {
+    console.log(
+      [
+        `task_id=${task.task_id}`,
+        `status=${task.status}`,
+        `message_ts=${task.message_ts || "-"}`,
+        `thread_ts=${task.thread_ts || "-"}`,
+        `task_file=${task.task_file || "-"}`,
+        `result_file=${task.result_file || "-"}`,
+        `updated_at=${task.updated_at || "-"}`,
+        `last_error=${task.last_error || "-"}`,
+      ].join(" | ")
+    );
+  }
+}
+
+async function processMessages({ config, slackClient, processedStore, taskStore, options }) {
   const messages = await slackClient.fetchRecentMessages({
     channelId: config.slackChannelId,
     limit: config.slackHistoryLimit,
@@ -130,6 +166,15 @@ async function processMessages({ config, slackClient, processedStore, options })
     appendJsonLine(config.logFilePath, buildTaskCreatedEvent({ eventRecord, taskFile }));
 
     const threadTs = message.thread_ts || message.ts;
+    if (taskStore && typeof taskStore.transition === "function") {
+      taskStore.transition(taskFile.taskId, "queued", {
+        message_ts: message.ts,
+        thread_ts: threadTs,
+        task_file: taskFile.fileName,
+        result_file: "",
+        last_error: "",
+      });
+    }
 
     processedStore.add(message.ts);
     processedCount += 1;
@@ -149,9 +194,16 @@ async function main() {
   const config = loadConfig();
   ensureRelayDirectories(config);
 
-  const slackClient = new SlackClient({ token: config.slackBotToken });
   const processedStore = new ProcessedMessageStore(config.processedMessagesPath);
   const postedStore = new PostedResultStore(config.postedResultsPath);
+  const taskStore = new TaskStore(config.tasksPath, config.logFilePath);
+
+  if (options.status) {
+    printStatus({ taskStore, processedStore, postedStore });
+    return;
+  }
+
+  const slackClient = new SlackClient({ token: config.slackBotToken });
 
   console.log(`CodexGptRelay 시작: channel=${config.slackChannelId}, interval=${config.pollIntervalMs}ms, dryRun=${options.dryRun}`);
 
@@ -161,12 +213,14 @@ async function main() {
         config,
         slackClient,
         processedStore,
+        taskStore,
         options,
       });
       const postedCount = await processOutboxResults({
         config,
         slackClient,
         postedStore,
+        taskStore,
         options,
       });
 

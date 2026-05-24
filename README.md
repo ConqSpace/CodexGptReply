@@ -85,6 +85,12 @@ node src/relay_daemon.js
 
 위 명령은 기본 10초 간격으로 계속 폴링합니다.
 
+```powershell
+node src/relay_daemon.js --status
+```
+
+위 명령은 Slack API를 호출하지 않고 최근 작업 상태를 출력합니다. 출력에는 작업 ID, 상태, Slack 메시지 시각, 작업 파일, 결과 파일, 마지막 오류만 포함합니다. Slack 토큰과 `.env` 값은 출력하지 않습니다.
+
 같은 명령을 npm 스크립트로도 실행할 수 있습니다.
 
 ```powershell
@@ -138,6 +144,18 @@ Slack으로 보낼 결과 본문입니다.
 - `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지와 작업 파일 생성 기록
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts` 목록
 - `state/posted_results.json`: 이미 전송한 결과 파일 목록
+- `state/tasks.json`: 최근 작업의 `task_id`, `status`, `message_ts`, `thread_ts`, `task_file`, `result_file`, `updated_at`, `last_error`를 저장합니다.
+
+작업 상태는 다음 흐름으로 기록됩니다.
+
+- `queued`: Slack 요청을 감지해 `inbox` 작업 파일을 만든 상태
+- `outbox_ready`: `outbox/*.md` 결과 파일을 읽어 Slack 전송 후보로 확인한 상태
+- `posted`: Slack 스레드 답장 전송과 전송 완료 기록이 끝난 상태
+- `failed`: 결과 파일 형식 오류 등으로 작업 처리가 실패한 상태
+- `waiting_for_user`: Codex app이 사용자 확인 질문을 남긴 상태
+- `running`: Codex app이 진행 상태를 남긴 상태
+
+`logs/relay_events.jsonl`에는 `task_status_changed` 상태 전이 이벤트가 추가됩니다. 잘못된 `outbox` 결과 파일 때문에 실패하면 `task_failed` 이벤트에 파일명과 부족한 필드가 함께 기록됩니다. 같은 파일에서 같은 오류가 반복될 때는 중복 실패 로그를 계속 쌓지 않습니다.
 
 `--dry-run`에서도 `inbox` 작업 파일, 로그, 처리 상태는 저장됩니다. 단, Slack 전송과 `outbox/sent` 이동은 하지 않고 콘솔에 전송 예정 정보만 표시합니다. 같은 메시지를 실제 전송으로 다시 검증하려면 `state/processed_messages.json`에서 해당 `ts`를 제거해야 합니다.
 

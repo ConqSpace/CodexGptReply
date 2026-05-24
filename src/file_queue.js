@@ -8,6 +8,15 @@ const RESULT_PREFIXES = {
   running: "[codex-status]",
 };
 
+class ResultValidationError extends Error {
+  constructor(fileName, missingFields) {
+    super(`${fileName} 결과 파일 필드가 부족합니다: ${missingFields.join(", ")}`);
+    this.name = "ResultValidationError";
+    this.fileName = fileName;
+    this.missingFields = missingFields;
+  }
+}
+
 function ensureRelayDirectories(config) {
   for (const directoryPath of [
     config.inboxDir,
@@ -174,7 +183,7 @@ function validateResult(result, fileName) {
   const missingFields = requiredFields.filter((fieldName) => !result[fieldName]);
 
   if (missingFields.length > 0) {
-    throw new Error(`${fileName} 결과 파일 필드가 부족합니다: ${missingFields.join(", ")}`);
+    throw new ResultValidationError(fileName, missingFields);
   }
 }
 
@@ -220,7 +229,41 @@ function moveResultToSent(config, fileName) {
   return targetPath;
 }
 
-async function processOutboxResults({ config, slackClient, postedStore, options }) {
+function taskStatusFromResultStatus(resultStatus) {
+  if (resultStatus === "waiting_for_user" || resultStatus === "running" || resultStatus === "failed") {
+    return resultStatus;
+  }
+
+  return "posted";
+}
+
+function recordOutboxFailure({ taskStore, candidate, result, error }) {
+  if (!taskStore) {
+    throw error;
+  }
+
+  const problemFields = Array.isArray(error.missingFields) ? error.missingFields : [];
+  const taskId = result.task_id || `outbox-${sanitizeId(candidate.fileName)}`;
+  const signature = JSON.stringify({
+    file: candidate.fileName,
+    message: error.message,
+    problemFields,
+  });
+
+  if (!taskStore.shouldLogOutboxFailure(candidate.fileName, signature)) {
+    return;
+  }
+
+  taskStore.recordFailure(taskId, {
+    thread_ts: result.thread_ts || "",
+    result_file: candidate.fileName,
+    last_error: `${candidate.fileName}: ${error.message}`,
+    problem_fields: problemFields,
+  });
+  taskStore.rememberOutboxFailure(candidate.fileName, signature);
+}
+
+async function processOutboxResults({ config, slackClient, postedStore, taskStore, options }) {
   const candidates = listOutboxCandidates(config);
   let postedCount = 0;
 
@@ -231,7 +274,22 @@ async function processOutboxResults({ config, slackClient, postedStore, options 
 
     const content = fs.readFileSync(candidate.filePath, "utf8");
     const result = parseResultFileContent(content);
-    validateResult(result, candidate.fileName);
+
+    try {
+      validateResult(result, candidate.fileName);
+    } catch (error) {
+      recordOutboxFailure({ taskStore, candidate, result, error });
+      continue;
+    }
+
+    if (taskStore) {
+      taskStore.clearOutboxFailure(candidate.fileName);
+      taskStore.transition(result.task_id, "outbox_ready", {
+        thread_ts: result.thread_ts,
+        result_file: candidate.fileName,
+        last_error: "",
+      });
+    }
 
     const slackText = buildSlackResultText(result);
 
@@ -248,6 +306,13 @@ async function processOutboxResults({ config, slackClient, postedStore, options 
 
     postedStore.add(candidate.fileName);
     moveResultToSent(config, candidate.fileName);
+    if (taskStore) {
+      taskStore.transition(result.task_id, taskStatusFromResultStatus(result.status), {
+        thread_ts: result.thread_ts,
+        result_file: candidate.fileName,
+        last_error: "",
+      });
+    }
     postedCount += 1;
     console.log(`결과 전송 완료: file=${candidate.fileName}, thread_ts=${result.thread_ts}`);
   }
@@ -264,6 +329,7 @@ module.exports = {
   listOutboxCandidates,
   parseResultFileContent,
   processOutboxResults,
+  ResultValidationError,
   sanitizeId,
   taskIdFromMessage,
 };

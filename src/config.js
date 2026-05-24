@@ -64,6 +64,7 @@ function loadConfig() {
     logFilePath: path.join(PROJECT_ROOT, "logs", "relay_events.jsonl"),
     processedMessagesPath: path.join(PROJECT_ROOT, "state", "processed_messages.json"),
     postedResultsPath: path.join(PROJECT_ROOT, "state", "posted_results.json"),
+    tasksPath: path.join(PROJECT_ROOT, "state", "tasks.json"),
     inboxDir: path.join(PROJECT_ROOT, "inbox"),
     outboxDir: path.join(PROJECT_ROOT, "outbox"),
     sentOutboxDir: path.join(PROJECT_ROOT, "outbox", "sent"),

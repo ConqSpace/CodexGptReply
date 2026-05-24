@@ -5,6 +5,7 @@
 ## 운영 원칙
 
 - 작업 확인은 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`를 기준으로 합니다.
+- 최근 상태 확인은 `node src/relay_daemon.js --status`를 사용합니다.
 - 실제 Slack 전송은 relay daemon이 담당합니다.
 - 결과 파일은 작성 중에는 `outbox/*.pending.md`로 둡니다.
 - 전송 준비가 끝났을 때만 `outbox/*.md`로 이름을 바꿉니다.
@@ -154,8 +155,38 @@ message: |
 7. 실제 외부 전송 테스트를 하지 않았으면 그 사실을 명확히 적습니다.
 8. 마지막에 `.md`로 이름을 바꿔 전송 후보로 만듭니다.
 
+## 작업 상태 확인
+
+daemon은 `state/tasks.json`에 최근 작업 상태를 저장합니다. 이 파일은 사람이 직접 수정하지 않습니다. 상태 확인이 필요하면 아래 명령을 사용합니다.
+
+```powershell
+node src/relay_daemon.js --status
+```
+
+출력에는 토큰이나 `.env` 값이 포함되지 않습니다. 다음 정보만 표시합니다.
+
+- `task_id`: 작업 식별자
+- `status`: 현재 작업 상태
+- `message_ts`: 원본 Slack 메시지 시각
+- `thread_ts`: 답장 대상 Slack 스레드 시각
+- `task_file`: `inbox` 작업 파일
+- `result_file`: `outbox` 결과 파일
+- `updated_at`: 마지막 상태 변경 시각
+- `last_error`: 마지막 오류 요약
+
+상태 의미:
+
+- `queued`: Slack 요청을 감지해 `inbox` 작업 파일을 만든 상태입니다.
+- `outbox_ready`: `outbox/*.md` 결과 파일을 읽어 전송 후보로 확인한 상태입니다.
+- `posted`: Slack 스레드 답장 전송과 전송 완료 기록이 끝난 상태입니다.
+- `failed`: 결과 파일 형식 오류 등으로 처리에 실패한 상태입니다.
+- `waiting_for_user`: Codex app이 사용자 확인 질문을 남긴 상태입니다.
+- `running`: Codex app이 진행 상태를 남긴 상태입니다.
+
+잘못된 `outbox` 결과 파일 때문에 실패하면 `logs/relay_events.jsonl`의 `task_failed` 이벤트와 `state/tasks.json`의 `last_error`에 파일명과 문제 필드가 남습니다. 같은 파일에서 같은 오류가 반복될 때는 실패 로그를 계속 추가하지 않습니다.
+
 ## 운영상 열린 부분
 
 - Codex app이 항상 자동으로 깨어 있는 것은 아닙니다.
 - 3단계는 반자동 운영입니다. 자동 실행 확대는 이후 단계에서 별도로 검토합니다.
-- `logs/relay_events.jsonl`은 작업 감지와 생성 이벤트 중심입니다. 세부 상태 관리는 이후 단계에서 보강합니다.
+- `state/tasks.json`은 운영 편의를 위한 최근 상태 저장소입니다. 장기 분석용 기록은 `logs/relay_events.jsonl`을 기준으로 확인합니다.
