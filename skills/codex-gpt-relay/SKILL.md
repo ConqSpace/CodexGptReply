@@ -137,6 +137,57 @@ Stop or ask the user when:
 - the requested action is destructive or broad
 - monitoring has no clear end condition and would run for a long time
 
+## New Project Slack Onboarding
+
+Use this when the user asks to connect a new project to Slack or add a project-specific relay channel.
+
+Checklist:
+
+1. Confirm the project ID, project name, local repo path, GitHub URL, and Notion target if any.
+2. Ask the user to create or confirm the project Slack channel if it does not exist yet.
+3. Get the Slack channel ID. Prefer the channel ID over the display name.
+4. Ensure the Slack bot is invited to the project channel.
+5. Add or update the project entry in `config/projects.json`.
+6. Set `enabled: true` only after `slackChannelId` is present.
+7. Restart the relay daemon so the new project list is loaded.
+8. Send or ask for a test message in the project channel:
+
+```text
+카를로스에게 전달:
+연결 테스트입니다.
+```
+
+9. Confirm `inbox/<project_id>/task_*.md` is created.
+10. Create a small test result in `outbox/<project_id>/`.
+11. Confirm the Slack thread receives `[codex-result]`.
+12. Report the channel, project ID, inbox path, outbox path, and test result.
+
+Project config shape:
+
+```json
+{
+  "id": "simple-memo",
+  "name": "Simple Memo",
+  "enabled": true,
+  "slackChannelId": "C0123456789",
+  "repoPath": "F:\\Antigravity\\SimpleMemo",
+  "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git",
+  "notion": {
+    "mode": "database",
+    "databaseName": "Simple Memo"
+  }
+}
+```
+
+Troubleshooting:
+
+- `channel_not_found`: check channel ID typo and whether the bot can see the channel.
+- `not_in_channel`: invite the bot to the project channel.
+- `missing_scope`: add `channels:read`, `channels:history`, `chat:write`, then reinstall the Slack app.
+- No inbox file: check `enabled`, `slackChannelId`, daemon restart, prefix, and `state/processed_messages.json`.
+- No Slack reply: check `outbox/<project_id>/`, `thread_ts`, `state/posted_results.json`, and daemon stderr.
+- Thread replies ignored: confirm the parent message has replies and the daemon is using `conversations.replies`.
+
 ## Message Rules
 
 Incoming work should preferably start with:

@@ -111,6 +111,8 @@ SLACK_HISTORY_LIMIT=20
 
 `enabled: false`이거나 `slackChannelId`가 비어 있는 프로젝트는 데몬이 폴링하지 않습니다.
 
+새 프로젝트에 Slack 채널을 처음 연결할 때 Codex가 따라야 할 운영 절차는 [skills/codex-gpt-relay/SKILL.md](skills/codex-gpt-relay/SKILL.md)의 `New Project Slack Onboarding` 섹션에 정리되어 있습니다.
+
 Slack App 권한을 바꾼 뒤에는 워크스페이스에 다시 설치하고, 봇을 각 프로젝트 채널에 초대해야 합니다.
 
 ```text
