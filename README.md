@@ -2,7 +2,9 @@
 
 Slack을 중계 채널로 사용해 GPT와 Codex 사이의 반자동 대화를 실험하는 로컬 relay daemon입니다.
 
-사용자는 GPT 화면에 머물고, GPT는 Slack에 `[to-codex]` 요청을 남깁니다. 로컬 데몬은 Slack Web API로 해당 메시지를 감지한 뒤 `inbox` 작업 파일을 만듭니다. 사람이 Codex app에서 작업을 처리하고 `outbox` 결과 파일을 만들면, 데몬이 같은 Slack 스레드에 결과를 전송합니다.
+사용자는 GPT 화면에 머물고, GPT는 Slack에 Codex용 요청을 남깁니다. 로컬 데몬은 Slack Web API로 채널 메시지와 스레드 댓글을 감지한 뒤 `inbox` 작업 파일을 만듭니다. 사람이 Codex app에서 작업을 처리하고 `outbox` 결과 파일을 만들면, 데몬이 같은 Slack 스레드에 결과를 전송합니다.
+
+Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처럼 보이는 **카를로스-조지** 별칭을 사용합니다. 이때 카를로스는 Codex 쪽 작업자, 조지는 GPT 쪽 사용자 창구를 뜻합니다.
 
 ## 목표
 
@@ -11,21 +13,25 @@ Slack을 중계 채널로 사용해 GPT와 Codex 사이의 반자동 대화를 �
 - 로컬 데몬은 Slack 메시지를 감지하고 `inbox` 작업 파일로 변환합니다.
 - 데몬은 `outbox` 결과 파일을 Slack 스레드에 구조화된 답장으로 전송합니다.
 - GPT는 Slack 답장을 읽고 사용자에게 다시 전달합니다.
+- 문서 작업은 Codex app의 Notion 커넥터에서 처리하고, 코드 작업은 Git 저장소에서 처리합니다.
 
 ## 현재 범위
 
-- `[to-codex]` 접두사가 붙은 Slack 메시지만 처리합니다.
+- `[to-codex]`, `카를로스에게 전달:`, `카를로스 요청` 접두사가 붙은 Slack 메시지를 새 작업으로 처리합니다.
+- `[to-codex-reply]` 접두사가 붙은 Slack 메시지는 기존 작업의 사용자 답변으로 처리합니다.
+- Slack 스레드 댓글도 처리합니다. 데몬은 `conversations.history`로 부모 메시지를 읽고, `reply_count > 0`인 메시지는 `conversations.replies`로 댓글을 펼칩니다.
 - 처리한 Slack 메시지 `ts`를 저장해 중복 작업 파일 생성을 막습니다.
 - `inbox`, `outbox`, `outbox/sent`, `state`, `logs` 디렉터리를 필요할 때 만듭니다.
 - 사람이 작성한 `outbox/*.md` 결과 파일만 전송 후보로 봅니다.
 - 작성 중인 `outbox/*.pending.md` 파일은 무시합니다.
-- Notion 기록과 Codex 자동 실행은 이후 단계입니다.
+- Notion 문서 생성/수정은 Codex app의 Notion 커넥터로 처리합니다. 데몬은 Notion API를 직접 호출하지 않습니다.
+- Codex 자동 실행은 이후 단계입니다.
 
 ## 동작 흐름
 
 ```text
 GPT
--> Slack #codex-gpt [to-codex]
+-> Slack #codex-gpt "카를로스에게 전달:"
 -> CodexGptRelay daemon
 -> inbox/task_<task_id>.md 생성
 -> Codex app 작업
@@ -35,6 +41,29 @@ GPT
 -> state/processed_messages.json 중복 처리 방지
 -> Slack thread [codex-result]
 -> GPT
+```
+
+문서와 코드는 아래처럼 나눕니다.
+
+```text
+Notion
+-> 기획서, 로드맵, 의사결정, 작업 로그
+
+Git
+-> 실행 코드, README, 템플릿, skill, 테스트
+```
+
+사용자 확인이 필요한 작업은 아래 흐름을 사용합니다.
+
+```text
+Codex app
+-> outbox/<task_id>.md status: waiting_for_user 또는 needs_user: true
+-> CodexGptRelay daemon
+-> Slack thread [codex-question]
+-> GPT가 사용자 답변 확인
+-> Slack thread [to-codex-reply]
+-> CodexGptRelay daemon
+-> state/tasks.json 상태를 running으로 전환
 ```
 
 ## 요구 사항
@@ -103,11 +132,53 @@ npm start
 
 Slack `#codex-gpt` 채널에 아래 메시지를 보냅니다.
 
+기본 권장 포맷:
+
+```text
+카를로스에게 전달:
+Simple Memo 기획서 초안을 Notion에 작성해줘.
+코드 작업은 하지 말고 문서만 만들어줘.
+```
+
+`task_id`는 선택입니다. 없으면 데몬이 Slack 메시지 `ts`를 바탕으로 `slack-<ts>` 형태의 작업 ID를 자동 생성합니다.
+
+기계형 포맷:
+
 ```text
 [to-codex]
 task_id: test-001
 
 request:
+Codex relay 테스트 응답을 보내줘.
+```
+
+GPT의 Slack 도구가 기계형 포맷을 안전 검사에서 막는 경우에는 사람 친화형 포맷을 사용합니다. 기본 권장 포맷은 `카를로스에게 전달:`입니다. `카를로스 요청`도 인식합니다.
+
+```text
+카를로스 요청
+작업 ID: test-001
+
+요청:
+Codex relay 테스트 응답을 보내줘.
+```
+
+`Codex 요청`도 계속 인식합니다.
+
+```text
+Codex 요청
+작업 ID: test-001
+
+요청:
+Codex relay 테스트 응답을 보내줘.
+```
+
+영어 라벨도 인식합니다.
+
+```text
+Codex request
+Task ID: test-001
+
+Request:
 Codex relay 테스트 응답을 보내줘.
 ```
 
@@ -118,6 +189,7 @@ Codex app 또는 사람이 작업을 마친 뒤 `outbox`에는 아래처럼 결�
 ```text
 task_id: test-001
 status: completed
+needs_user: false
 thread_ts: 1710000000.000000
 message: |
   Slack 왕복 검증용 응답입니다.
@@ -129,11 +201,67 @@ frontmatter 형식도 사용할 수 있습니다.
 ---
 task_id: test-001
 status: completed
+needs_user: false
 thread_ts: "1710000000.000000"
 ---
 
 Slack으로 보낼 결과 본문입니다.
 ```
+
+확인이 필요한 작업은 `status: waiting_for_user` 또는 `needs_user: true`로 작성합니다. `needs_user: true`인데 `status`가 없으면 daemon은 `waiting_for_user`로 취급합니다. `needs_user: true`와 다른 `status`를 함께 쓰면 형식 오류로 기록하고 전송하지 않습니다.
+
+```text
+task_id: test-001
+needs_user: true
+thread_ts: 1710000000.000000
+message: |
+  확인이 필요합니다.
+
+  파일 삭제가 포함되어 있어 바로 실행하지 않았습니다.
+  삭제 대상과 되돌릴 방법을 확인해도 될까요?
+```
+
+사용자가 GPT에서 답하면 GPT는 같은 Slack 스레드에 아래 형식으로 남깁니다. `task_id`가 없으면 daemon은 Slack 스레드 `thread_ts`로 기존 작업을 찾습니다. `thread_ts`를 적으면 daemon이 기존 작업의 스레드와 일치하는지 확인합니다.
+
+```text
+[to-codex-reply]
+task_id: test-001
+thread_ts: 1710000000.000000
+answer: |
+  삭제하지 말고 목록만 먼저 보여주세요.
+```
+
+GPT가 기계형 답변을 보내지 못하면 아래 사람 친화형 답변을 사용합니다. 기본 권장 포맷은 `카를로스 답변`입니다.
+
+```text
+카를로스 답변
+작업 ID: test-001
+thread_ts: 1710000000.000000
+답변: |
+  삭제하지 말고 목록만 먼저 보여주세요.
+```
+
+`Codex 답변`도 계속 인식합니다.
+
+```text
+Codex 답변
+작업 ID: test-001
+thread_ts: 1710000000.000000
+답변: |
+  삭제하지 말고 목록만 먼저 보여주세요.
+```
+
+영어 라벨도 인식합니다.
+
+```text
+Codex reply
+Task ID: test-001
+thread_ts: 1710000000.000000
+answer: |
+  삭제하지 말고 목록만 먼저 보여주세요.
+```
+
+유효한 답변이면 `state/tasks.json`의 해당 작업이 `running`으로 바뀌고 `last_user_reply`에 답변 본문, 답변 메시지 `ts`, 수신 시각이 저장됩니다. 잘못된 답변은 자동 실행하지 않고 `logs/relay_events.jsonl`에 `user_reply_ignored` 이벤트로 남습니다.
 
 ## 생성되는 로컬 파일
 
@@ -141,10 +269,10 @@ Slack으로 보낼 결과 본문입니다.
 - `outbox/*.md`: Slack 전송 후보 결과 파일
 - `outbox/*.pending.md`: 작성 중인 결과 파일이며 데몬이 무시합니다.
 - `outbox/sent/*.md`: Slack 전송 성공 뒤 이동된 결과 파일
-- `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지와 작업 파일 생성 기록
+- `logs/relay_events.jsonl`: 감지한 요청 메시지, 작업 파일 생성 기록, 사용자 답변 처리 이벤트
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts` 목록
 - `state/posted_results.json`: 이미 전송한 결과 파일 목록
-- `state/tasks.json`: 최근 작업의 `task_id`, `status`, `message_ts`, `thread_ts`, `task_file`, `result_file`, `updated_at`, `last_error`를 저장합니다.
+- `state/tasks.json`: 최근 작업의 `task_id`, `status`, `message_ts`, `thread_ts`, `task_file`, `result_file`, `updated_at`, `last_error`, `last_user_reply`를 저장합니다.
 
 작업 상태는 다음 흐름으로 기록됩니다.
 
@@ -155,17 +283,19 @@ Slack으로 보낼 결과 본문입니다.
 - `waiting_for_user`: Codex app이 사용자 확인 질문을 남긴 상태
 - `running`: Codex app이 진행 상태를 남긴 상태
 
-`logs/relay_events.jsonl`에는 `task_status_changed` 상태 전이 이벤트가 추가됩니다. 잘못된 `outbox` 결과 파일 때문에 실패하면 `task_failed` 이벤트에 파일명과 부족한 필드가 함께 기록됩니다. 같은 파일에서 같은 오류가 반복될 때는 중복 실패 로그를 계속 쌓지 않습니다.
+`logs/relay_events.jsonl`에는 `task_status_changed` 상태 전이 이벤트가 추가됩니다. 잘못된 `outbox` 결과 파일 때문에 실패하면 `task_failed` 이벤트에 파일명과 부족한 필드가 함께 기록됩니다. 같은 파일에서 같은 오류가 반복될 때는 중복 실패 로그를 계속 쌓지 않습니다. 사용자 답변이 유효하면 `user_reply_received`, 잘못됐으면 `user_reply_ignored` 이벤트가 남습니다.
 
 `--dry-run`에서도 `inbox` 작업 파일, 로그, 처리 상태는 저장됩니다. 단, Slack 전송과 `outbox/sent` 이동은 하지 않고 콘솔에 전송 예정 정보만 표시합니다. 같은 메시지를 실제 전송으로 다시 검증하려면 `state/processed_messages.json`에서 해당 `ts`를 제거해야 합니다.
 
 ## 문서
 
-자세한 Slack 권한과 설정 방법은 [docs/slack_setup.md](docs/slack_setup.md)를 참고합니다.
+자세한 Slack 권한과 설정 방법은 [docs/slack_setup.md](docs/slack_setup.md)를 참고합니다. 스레드 댓글 조회에는 별도 `replies` 권한이 없고, 공개 채널 기준 `channels:history` 권한을 사용합니다.
 
 Codex app에서 `logs/relay_events.jsonl`과 `inbox`를 감시하고 `outbox` 결과 파일을 남기는 운영 절차는 [docs/codex_app_operations.md](docs/codex_app_operations.md)를 참고합니다.
 
 복사해서 쓸 수 있는 결과 파일 템플릿은 [templates/outbox_result.pending.md](templates/outbox_result.pending.md)에 있습니다. 이 파일은 템플릿 폴더에 있으므로 실제 Slack 전송 후보가 아닙니다.
+
+사용자 확인 질문 템플릿은 [templates/outbox_question.pending.md](templates/outbox_question.pending.md)에 있습니다.
 
 프로젝트 방향과 단계별 계획은 아래 문서를 참고합니다.
 
@@ -212,5 +342,11 @@ $codex-gpt-relay로 relay 한 번 확인해줘.
 ## 현재 한계
 
 - 실제 Codex app 작업 처리는 사람이 수행합니다.
-- Notion 기록은 이후 단계입니다.
-- 현재 방식은 Slack `conversations.history` 폴링입니다. 더 빠른 반응이 필요하면 나중에 Socket Mode 전환을 검토합니다.
+- Notion 작업은 Codex app 커넥터로 처리합니다. 데몬은 Slack과 파일 큐만 담당합니다.
+- 현재 방식은 Slack `conversations.history`와 `conversations.replies` 폴링입니다. 더 빠른 반응이 필요하면 나중에 Socket Mode 전환을 검토합니다.
+
+## 검증된 테스트
+
+- `Simple Memo` Notion 데이터베이스에 기획서를 생성하고 여러 차례 업데이트했습니다.
+- Slack 스레드 댓글로 들어온 후속 요청을 감지해 같은 스레드에 결과를 보냈습니다.
+- `ConqSpace/SimpleMemo` 저장소를 만들고 README와 테스트 문서를 푸시했습니다.

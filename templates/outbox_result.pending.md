@@ -1,5 +1,6 @@
 task_id: <inbox의 task_id>
 status: completed
+needs_user: false
 thread_ts: <inbox의 thread_ts>
 message: |
   요약:

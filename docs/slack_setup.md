@@ -8,6 +8,8 @@ Slack App의 Bot Token Scopes에 다음 권한을 추가합니다.
 - `channels:history`
 - `chat:write`
 
+스레드 댓글 조회에 `replies`라는 별도 권한은 없습니다. 공개 채널에서는 `conversations.replies`도 `channels:history` 권한으로 조회합니다. 비공개 채널, DM, 멀티 DM으로 확장할 때는 각각 `groups:history`, `im:history`, `mpim:history`가 필요합니다.
+
 권한을 바꾼 뒤에는 Slack App을 워크스페이스에 다시 설치해야 합니다. 그리고 Bot을 `#codex-gpt` 채널에 초대합니다.
 
 ## 로컬 설정
@@ -42,7 +44,7 @@ node src/relay_daemon.js --once
 node src/relay_daemon.js
 ```
 
-10초마다 `conversations.history`를 호출합니다. Slack API가 `429`를 반환하면 `Retry-After` 값만큼 기다린 뒤 다시 시도합니다.
+10초마다 `conversations.history`를 호출합니다. 스레드 댓글이 있는 메시지는 `conversations.replies`를 추가 호출해 댓글까지 확인합니다. Slack API가 `429`를 반환하면 `Retry-After` 값만큼 기다린 뒤 다시 시도합니다.
 
 ## 생성되는 로컬 파일
 
@@ -57,6 +59,13 @@ node src/relay_daemon.js
 ## 파일 큐 사용법
 
 Slack 요청에는 `task_id`를 넣을 수 있습니다. `task_id`가 없으면 데몬이 Slack 메시지 `ts`를 바탕으로 안전한 값을 만듭니다.
+
+GPT의 Slack 도구가 기계형 포맷을 막는 경우에는 아래 형식을 권장합니다.
+
+```text
+카를로스에게 전달:
+README의 파일 큐 설명을 확인해줘.
+```
 
 ```text
 [to-codex]
@@ -94,7 +103,8 @@ thread_ts: "1710000000.000000"
 
 ## 메시지 처리 규칙
 
-- 본문이 `[to-codex]`로 시작하는 메시지만 처리합니다.
+- 본문이 `[to-codex]`, `카를로스에게 전달:`, `카를로스 요청` 등 지원 접두사로 시작하는 메시지를 처리합니다.
+- 스레드 댓글도 처리합니다. 부모 메시지에 `reply_count`가 있으면 댓글을 펼쳐 보고, 각 댓글 `ts`로 중복 처리를 막습니다.
 - `[codex-result]`, `[codex-question]`, `[codex-status]` 메시지는 접두사가 다르므로 무시됩니다.
 - `--dry-run`에서도 작업 파일, 로그, 처리 상태는 저장됩니다. Slack 전송과 `outbox/sent` 이동은 하지 않습니다.
 - 같은 메시지를 실제 전송으로 다시 검증하려면 해당 `ts`를 상태 파일에서 제거해야 합니다.

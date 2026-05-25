@@ -109,6 +109,19 @@ function createEmptyTask(taskId) {
     result_file: "",
     updated_at: "",
     last_error: "",
+    last_user_reply: null,
+  };
+}
+
+function normalizeUserReply(rawReply) {
+  if (!rawReply || typeof rawReply !== "object") {
+    return null;
+  }
+
+  return {
+    answer: String(rawReply.answer || ""),
+    reply_message_ts: String(rawReply.reply_message_ts || ""),
+    received_at: String(rawReply.received_at || ""),
   };
 }
 
@@ -127,6 +140,7 @@ function normalizeTask(rawTask) {
     result_file: String(rawTask && rawTask.result_file ? rawTask.result_file : ""),
     updated_at: String(rawTask && rawTask.updated_at ? rawTask.updated_at : ""),
     last_error: String(rawTask && rawTask.last_error ? rawTask.last_error : ""),
+    last_user_reply: normalizeUserReply(rawTask && rawTask.last_user_reply),
   };
 }
 
@@ -165,6 +179,14 @@ class TaskStore {
 
   get(taskId) {
     return this.taskMap.get(taskId) || null;
+  }
+
+  findByThreadTs(threadTs) {
+    if (!threadTs) {
+      return null;
+    }
+
+    return Array.from(this.taskMap.values()).find((task) => task.thread_ts === threadTs) || null;
   }
 
   transition(taskId, nextStatus, updates = {}) {
@@ -220,6 +242,29 @@ class TaskStore {
       result_file: task ? task.result_file : updates.result_file || "",
       last_error: task ? task.last_error : updates.last_error || "",
       problem_fields: updates.problem_fields || [],
+    });
+
+    return task;
+  }
+
+  recordUserReply(taskId, reply) {
+    const receivedAt = reply.received_at || new Date().toISOString();
+    const task = this.transition(taskId, "running", {
+      last_error: "",
+      last_user_reply: {
+        answer: reply.answer || "",
+        reply_message_ts: reply.reply_message_ts || "",
+        received_at: receivedAt,
+      },
+    });
+
+    appendJsonLine(this.logFilePath, {
+      event: "user_reply_received",
+      received_at: receivedAt,
+      task_id: taskId,
+      message_ts: task ? task.message_ts : "",
+      thread_ts: task ? task.thread_ts : "",
+      reply_message_ts: reply.reply_message_ts || "",
     });
 
     return task;

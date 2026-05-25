@@ -8,6 +8,23 @@ const {
 } = require("./file_queue");
 
 const TO_CODEX_PREFIX = "[to-codex]";
+const TO_CODEX_REPLY_PREFIX = "[to-codex-reply]";
+const HUMAN_CODEX_REQUEST_PREFIXES = [
+  /^Codex\s*요청(?:\s|$)/i,
+  /^Codex\s*request(?:\s|$)/i,
+  /^카를로스\s*요청(?:\s|$)/i,
+  /^카를로스에게\s*전달\s*:?/i,
+  /^Carlos\s*request(?:\s|$)/i,
+  /^Codex에게\s*전달할\s*작업입니다\.?/i,
+];
+const HUMAN_CODEX_REPLY_PREFIXES = [
+  /^Codex\s*답변(?:\s|$)/i,
+  /^Codex\s*reply(?:\s|$)/i,
+  /^카를로스\s*답변(?:\s|$)/i,
+  /^카를로스에게\s*답변\s*:?/i,
+  /^Carlos\s*reply(?:\s|$)/i,
+  /^Codex에게\s*전달할\s*답변입니다\.?/i,
+];
 const CODEX_RESULT_PREFIX = "[codex-result]";
 
 function parseArguments(argv) {
@@ -58,7 +75,104 @@ function printHelp() {
 
 function isToCodexMessage(message) {
   const text = typeof message.text === "string" ? message.text.trimStart() : "";
-  return text.startsWith(TO_CODEX_PREFIX);
+  return text.startsWith(TO_CODEX_PREFIX) || HUMAN_CODEX_REQUEST_PREFIXES.some((pattern) => pattern.test(text));
+}
+
+function isToCodexReplyMessage(message) {
+  const text = typeof message.text === "string" ? message.text.trimStart() : "";
+  return text.startsWith(TO_CODEX_REPLY_PREFIX) || HUMAN_CODEX_REPLY_PREFIXES.some((pattern) => pattern.test(text));
+}
+
+function parseFieldBlock(text) {
+  const values = {};
+  const lines = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^([A-Za-z0-9_-]+|task\s*id|작업\s*ID|작업\s*아이디|답변)\s*:\s*(.*)$/i);
+    if (!match) {
+      continue;
+    }
+
+    const rawKey = match[1];
+    const normalizedKey = rawKey.replace(/\s+/g, "").toLowerCase();
+    const key = normalizedKey === "작업id" || normalizedKey === "작업아이디"
+      ? "task_id"
+      : normalizedKey === "taskid"
+        ? "task_id"
+      : normalizedKey === "답변"
+        ? "answer"
+        : rawKey;
+    const rawValue = match[2];
+
+    if (rawValue === "|" || rawValue === ">") {
+      const blockLines = [];
+      index += 1;
+
+      while (index < lines.length) {
+        const blockLine = lines[index];
+        if (/^[A-Za-z0-9_-]+:\s*/.test(blockLine)) {
+          index -= 1;
+          break;
+        }
+
+        blockLines.push(blockLine.replace(/^\s{2,}/, ""));
+        index += 1;
+      }
+
+      values[key] = blockLines.join("\n").trim();
+      continue;
+    }
+
+    values[key] = rawValue.trim().replace(/^["']|["']$/g, "");
+  }
+
+  return values;
+}
+
+function stripToCodexReplyPrefix(text) {
+  return String(text || "")
+    .replace(/^\s*\[to-codex-reply\]\s*/i, "")
+    .replace(/^\s*Codex\s*답변(?:\s|$)/i, "")
+    .replace(/^\s*Codex\s*reply(?:\s|$)/i, "")
+    .replace(/^\s*카를로스\s*답변(?:\s|$)/i, "")
+    .replace(/^\s*카를로스에게\s*답변\s*:?\s*/i, "")
+    .replace(/^\s*Carlos\s*reply(?:\s|$)/i, "")
+    .replace(/^\s*Codex에게\s*전달할\s*답변입니다\.?\s*/i, "")
+    .trim();
+}
+
+function parseReplyMessage(message) {
+  const body = stripToCodexReplyPrefix(message.text || "");
+  const values = parseFieldBlock(body);
+
+  if (!values.answer) {
+    const firstBlankLineIndex = body.search(/\r?\n\r?\n/);
+    if (firstBlankLineIndex !== -1) {
+      values.answer = body.slice(firstBlankLineIndex).trim();
+    } else {
+      values.answer = body.trim();
+    }
+  }
+
+  return {
+    task_id: values.task_id || "",
+    thread_ts: values.thread_ts || "",
+    answer: values.answer || values.message || "",
+  };
+}
+
+function buildReplyIgnoredEvent({ channelId, message, reason, taskId, expectedThreadTs, actualThreadTs }) {
+  return {
+    event: "user_reply_ignored",
+    ignored_at: new Date().toISOString(),
+    channel: channelId,
+    ts: message.ts || "",
+    task_id: taskId || "",
+    reason,
+    expected_thread_ts: expectedThreadTs || "",
+    actual_thread_ts: actualThreadTs || "",
+  };
 }
 
 function buildEventRecord({ channelId, message, dryRun }) {
@@ -130,23 +244,172 @@ function printStatus({ taskStore, processedStore, postedStore }) {
         `task_file=${task.task_file || "-"}`,
         `result_file=${task.result_file || "-"}`,
         `updated_at=${task.updated_at || "-"}`,
+        `last_user_reply_at=${task.last_user_reply ? task.last_user_reply.received_at : "-"}`,
         `last_error=${task.last_error || "-"}`,
       ].join(" | ")
     );
   }
 }
 
-async function processMessages({ config, slackClient, processedStore, taskStore, options }) {
-  const messages = await slackClient.fetchRecentMessages({
+function shouldFetchThreadReplies(message) {
+  const replyCount = Number(message.reply_count || 0);
+
+  return Boolean(message.ts && replyCount > 0);
+}
+
+async function collectMessagesForProcessing({ config, slackClient }) {
+  const channelMessages = await slackClient.fetchRecentMessages({
     channelId: config.slackChannelId,
     limit: config.slackHistoryLimit,
   });
+  const messagesByTs = new Map();
+
+  for (const message of channelMessages) {
+    if (message.ts) {
+      messagesByTs.set(message.ts, message);
+    }
+
+    if (!shouldFetchThreadReplies(message)) {
+      continue;
+    }
+
+    const threadTs = message.thread_ts || message.ts;
+    const replies = await slackClient.fetchThreadReplies({
+      channelId: config.slackChannelId,
+      threadTs,
+      limit: config.slackHistoryLimit,
+    });
+
+    for (const reply of replies) {
+      if (reply.ts) {
+        messagesByTs.set(reply.ts, reply);
+      }
+    }
+  }
+
+  return [...messagesByTs.values()].sort((left, right) => Number(left.ts || 0) - Number(right.ts || 0));
+}
+
+function validateReply({ parsedReply, message, taskStore }) {
+  const actualThreadTs = message.thread_ts || message.ts || "";
+
+  if (!parsedReply.task_id) {
+    const taskByThread = taskStore.findByThreadTs(actualThreadTs);
+    if (!taskByThread) {
+      return {
+        valid: false,
+        reason: "task_id 없음",
+        task: null,
+        actualThreadTs,
+      };
+    }
+
+    parsedReply.task_id = taskByThread.task_id;
+  }
+
+  const task = taskStore.get(parsedReply.task_id);
+  if (!task) {
+    return {
+      valid: false,
+      reason: "알 수 없는 task_id",
+      task: null,
+      actualThreadTs,
+    };
+  }
+
+  const expectedThreadTs = task.thread_ts || "";
+
+  if (expectedThreadTs && actualThreadTs && expectedThreadTs !== actualThreadTs) {
+    return {
+      valid: false,
+      reason: "Slack 스레드 불일치",
+      task,
+      actualThreadTs,
+    };
+  }
+
+  if (parsedReply.thread_ts && expectedThreadTs && parsedReply.thread_ts !== expectedThreadTs) {
+    return {
+      valid: false,
+      reason: "본문 thread_ts 불일치",
+      task,
+      actualThreadTs,
+    };
+  }
+
+  if (!parsedReply.answer) {
+    return {
+      valid: false,
+      reason: "answer 없음",
+      task,
+      actualThreadTs,
+    };
+  }
+
+  return {
+    valid: true,
+    reason: "",
+    task,
+    actualThreadTs,
+  };
+}
+
+function processReplyMessage({ config, message, processedStore, taskStore }) {
+  const parsedReply = parseReplyMessage(message);
+  const validation = validateReply({ parsedReply, message, taskStore });
+
+  if (!validation.valid) {
+    appendJsonLine(
+      config.logFilePath,
+      buildReplyIgnoredEvent({
+        channelId: config.slackChannelId,
+        message,
+        reason: validation.reason,
+        taskId: parsedReply.task_id,
+        expectedThreadTs: validation.task ? validation.task.thread_ts : "",
+        actualThreadTs: validation.actualThreadTs,
+      })
+    );
+    processedStore.add(message.ts);
+    console.log(`사용자 답변 무시: ts=${message.ts}, reason=${validation.reason}`);
+    return false;
+  }
+
+  const receivedAt = new Date().toISOString();
+  taskStore.recordUserReply(parsedReply.task_id, {
+    answer: parsedReply.answer,
+    reply_message_ts: message.ts,
+    received_at: receivedAt,
+  });
+
+  processedStore.add(message.ts);
+  console.log(`사용자 답변 수신: task_id=${parsedReply.task_id}, ts=${message.ts}`);
+  return true;
+}
+
+async function processMessages({ config, slackClient, processedStore, taskStore, options }) {
+  const messages = await collectMessagesForProcessing({ config, slackClient });
 
   let processedCount = 0;
-  const orderedMessages = [...messages].reverse();
+  const orderedMessages = messages;
 
   for (const message of orderedMessages) {
-    if (!message.ts || processedStore.has(message.ts) || !isToCodexMessage(message)) {
+    if (!message.ts || processedStore.has(message.ts)) {
+      continue;
+    }
+
+    if (isToCodexReplyMessage(message)) {
+      processReplyMessage({
+        config,
+        message,
+        processedStore,
+        taskStore,
+      });
+      processedCount += 1;
+      continue;
+    }
+
+    if (!isToCodexMessage(message)) {
       continue;
     }
 
@@ -224,7 +487,7 @@ async function main() {
         options,
       });
 
-      console.log(`이번 조회 작업 생성 수: ${processedCount}, 결과 전송 수: ${postedCount}`);
+      console.log(`이번 조회 처리 메시지 수: ${processedCount}, 결과 전송 수: ${postedCount}`);
     } catch (error) {
       console.error(`조회 실패: ${error.message}`);
     }
@@ -247,6 +510,9 @@ if (require.main === module) {
 module.exports = {
   processMessages,
   isToCodexMessage,
+  isToCodexReplyMessage,
+  parseReplyMessage,
+  processReplyMessage,
   buildFixedReply,
   buildTaskCreatedEvent,
 };

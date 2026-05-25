@@ -12,8 +12,17 @@ Its purpose is to let the user stay mostly in GPT while Slack carries messages b
 Core flow:
 
 ```text
-GPT -> Slack #codex-gpt [to-codex] -> relay daemon -> Codex work -> [codex-result]
+GPT -> Slack #codex-gpt "카를로스에게 전달:" -> relay daemon -> Codex work -> [codex-result]
+Codex question -> Slack [codex-question] -> GPT/user answer -> Slack [to-codex-reply] -> relay daemon resumes task
 ```
+
+Slack-facing alias:
+
+- `카를로스`: Codex-side worker
+- `조지`: GPT-side user-facing relay
+- Prefer `카를로스에게 전달:` and `카를로스에게 답변:` when GPT's Slack sender blocks machine-style tags.
+- `task_id` is optional for requests. If omitted, the daemon creates `slack-<message ts>`.
+- Thread replies are supported. The daemon reads channel parents with `conversations.history` and expands parents with replies using `conversations.replies`.
 
 ## Safety Rules
 
@@ -23,6 +32,7 @@ GPT -> Slack #codex-gpt [to-codex] -> relay daemon -> Codex work -> [codex-resul
 - 위험한 파일 삭제, 대량 이동, Git push, 외부 전송은 사용자 확인 없이 실행하지 않는다.
 - `logs/`, `state/`, `.env`, `node_modules/`는 저장소에 올리지 않는다.
 - 문서를 읽을 때는 UTF-8로 조회한다.
+- 문서 작업은 Notion 커넥터로 처리하고, 코드 작업은 Git 저장소에서 처리한다. relay daemon은 Notion API를 직접 호출하지 않는다.
 
 ## Mode Selection
 
@@ -113,9 +123,10 @@ Checklist:
 - `inbox`와 `outbox` 작업을 처리하기 전에 `docs/codex_app_operations.md`를 읽는다.
 - 새 작업의 기준 자료는 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`로 본다.
 - 모든 `outbox` 결과 파일에는 `inbox` 작업 파일의 `thread_ts`를 그대로 복사한다.
-- `outbox` 필수 필드는 `task_id`, `status`, `thread_ts`, `message`이다.
-- 위험하거나 불명확한 작업은 `status: waiting_for_user`를 사용해 daemon이 `[codex-question]`으로 답하게 한다.
+- `outbox` 필수 필드는 `task_id`, `status`, `thread_ts`, `message`이다. 사용자 확인이 필요하면 `needs_user: true`도 적는다.
+- 위험하거나 불명확한 작업은 `status: waiting_for_user`와 `needs_user: true`를 사용해 daemon이 `[codex-question]`으로 답하게 한다.
 - 결과가 완성되고 전송해도 안전하다고 판단하기 전에는 최종 `outbox/*.md` 파일을 만들지 않는다.
+- 사용자 답변은 `[to-codex-reply]` 메시지로 들어온다. `task_id`가 없으면 같은 Slack 스레드의 기존 작업을 찾고, Slack 스레드가 기존 작업과 다르면 무시된다.
 
 Stop or ask the user when:
 
@@ -126,10 +137,87 @@ Stop or ask the user when:
 
 ## Message Rules
 
-Incoming work must start with:
+Incoming work should preferably start with:
+
+```text
+카를로스에게 전달:
+<request>
+```
+
+Machine-style work can start with:
 
 ```text
 [to-codex]
+```
+
+If GPT's Slack sender blocks the machine-style tag, use the human-friendly equivalent. The daemon can also read:
+
+```text
+카를로스 요청
+작업 ID: <optional task id>
+
+요청:
+<request>
+```
+
+`Codex 요청` is also accepted:
+
+```text
+Codex 요청
+작업 ID: <optional task id>
+
+요청:
+<request>
+```
+
+English labels are also accepted:
+
+```text
+Codex request
+Task ID: <optional task id>
+
+Request:
+<request>
+```
+
+Incoming user replies must start with:
+
+```text
+[to-codex-reply]
+task_id: <optional task id when replying in the same Slack thread>
+thread_ts: <recommended Slack thread ts>
+answer: |
+  <user answer>
+```
+
+If the machine-style reply is blocked, use the Carlos-George alias:
+
+```text
+카를로스 답변
+작업 ID: <optional task id when replying in the same Slack thread>
+thread_ts: <recommended Slack thread ts>
+답변: |
+  <user answer>
+```
+
+`Codex 답변` is also accepted:
+
+```text
+Codex 답변
+작업 ID: <optional task id when replying in the same Slack thread>
+thread_ts: <recommended Slack thread ts>
+답변: |
+  <user answer>
+```
+
+English labels are also accepted:
+
+```text
+Codex reply
+Task ID: <optional task id when replying in the same Slack thread>
+thread_ts: <recommended Slack thread ts>
+answer: |
+  <user answer>
 ```
 
 The relay should ignore:
@@ -146,14 +234,13 @@ Use this result shape for Slack-ready output:
 [codex-result]
 task_id: <id if known>
 status: completed
+needs_user: false
 
 summary:
 <short result>
 
 details:
 - <important detail>
-
-needs_user: false
 ```
 
 Use this question shape when blocked:
@@ -162,10 +249,19 @@ Use this question shape when blocked:
 [codex-question]
 task_id: <id if known>
 status: waiting_for_user
+needs_user: true
 
 question:
 <specific question>
 ```
+
+When `[to-codex-reply]` is valid, the daemon records `last_user_reply` in `state/tasks.json`, writes a `user_reply_received` event, and changes the task status back to `running`. Invalid replies only create `user_reply_ignored` events and must not trigger execution.
+
+Verified workflow:
+
+- Notion `Simple Memo` database was used for planning docs through the Codex app Notion connector.
+- GitHub `ConqSpace/SimpleMemo` was used for README and test file commits.
+- Slack thread replies were detected and answered in the same thread.
 
 ## Project Commands
 

@@ -3,4 +3,5 @@ logs/
 state/
 inbox/
 outbox/
+runtime/
 node_modules/

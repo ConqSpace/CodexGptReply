@@ -7,6 +7,8 @@
 - 작업 확인은 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`를 기준으로 합니다.
 - 최근 상태 확인은 `node src/relay_daemon.js --status`를 사용합니다.
 - 실제 Slack 전송은 relay daemon이 담당합니다.
+- 문서 작업은 Codex app의 Notion 커넥터로 처리합니다. relay daemon이 Notion API를 직접 호출하지 않습니다.
+- 코드 작업은 Git 저장소에서 처리합니다. 작업 로그와 결정 사항은 필요하면 Notion에 남깁니다.
 - 결과 파일은 작성 중에는 `outbox/*.pending.md`로 둡니다.
 - 전송 준비가 끝났을 때만 `outbox/*.md`로 이름을 바꿉니다.
 - 위험한 작업은 바로 실행하지 않고 `[codex-question]` 결과로 사용자 확인을 요청합니다.
@@ -61,6 +63,7 @@ outbox/<task_id>.md
 
 - `task_id`: `inbox` 작업 파일의 `task_id`와 같아야 합니다.
 - `status`: `completed`, `failed`, `waiting_for_user`, `running` 중 하나를 사용합니다.
+- `needs_user`: 사용자 확인이 필요하면 `true`, 아니면 `false`를 사용합니다. `needs_user: true`인데 `status`가 없으면 daemon은 `waiting_for_user`로 취급합니다.
 - `thread_ts`: `inbox` 작업 파일의 `thread_ts` 값을 그대로 사용합니다.
 - `message`: Slack에 보낼 본문입니다.
 
@@ -69,6 +72,7 @@ outbox/<task_id>.md
 ```text
 task_id: <작업 ID>
 status: completed
+needs_user: false
 thread_ts: <Slack 스레드 ts>
 message: |
   요약:
@@ -104,6 +108,8 @@ daemon은 `status`에 따라 Slack 접두사를 붙입니다.
 - `waiting_for_user`: `[codex-question]`
 - `running`: `[codex-status]`
 
+`needs_user: true`와 `status: completed`처럼 서로 다른 의미의 값을 함께 쓰면 daemon은 결과 파일 오류로 기록하고 전송하지 않습니다.
+
 ## 새 작업 확인 체크리스트
 
 1. `logs/relay_events.jsonl`의 마지막 줄부터 확인합니다.
@@ -134,6 +140,7 @@ daemon은 `status`에 따라 Slack 접두사를 붙입니다.
 ```text
 task_id: <작업 ID>
 status: waiting_for_user
+needs_user: true
 thread_ts: <Slack 스레드 ts>
 message: |
   확인이 필요합니다.
@@ -144,16 +151,71 @@ message: |
 
 이 파일이 `outbox/<task_id>.md`로 준비되면 daemon은 Slack 스레드에 `[codex-question]`으로 답장합니다.
 
+## 사용자 답변 처리
+
+사용자가 GPT에서 확인 질문에 답하면 GPT는 같은 Slack 스레드에 `[to-codex-reply]` 메시지를 남깁니다. `task_id`는 권장 필드입니다. 없으면 daemon이 Slack 스레드 `thread_ts`로 기존 작업을 찾습니다. `thread_ts`는 권장 필드이며, 적혀 있으면 daemon이 기존 작업의 `thread_ts`와 비교합니다.
+
+```text
+[to-codex-reply]
+task_id: <작업 ID>
+thread_ts: <Slack 스레드 ts>
+answer: |
+  <사용자 답변 본문>
+```
+
+GPT의 Slack 도구가 기계형 태그를 안전 검사에서 막으면 사람 친화형 포맷을 사용합니다. 기본 권장 포맷은 `카를로스 답변`입니다.
+
+```text
+카를로스 답변
+작업 ID: <작업 ID>
+thread_ts: <Slack 스레드 ts>
+답변: |
+  <사용자 답변 본문>
+```
+
+`Codex 답변`도 계속 인식합니다.
+
+```text
+Codex 답변
+작업 ID: <작업 ID>
+thread_ts: <Slack 스레드 ts>
+답변: |
+  <사용자 답변 본문>
+```
+
+영어 라벨도 인식합니다.
+
+```text
+Codex reply
+Task ID: <작업 ID>
+thread_ts: <Slack 스레드 ts>
+answer: |
+  <사용자 답변 본문>
+```
+
+daemon은 다음 조건을 모두 만족할 때만 답변을 유효하게 봅니다.
+
+- `task_id`가 있거나 같은 Slack 스레드에서 기존 작업을 찾을 수 있습니다.
+- `state/tasks.json`에 연결할 작업이 있습니다.
+- Slack 메시지의 스레드가 기존 작업의 `thread_ts`와 같습니다.
+- 본문에 `thread_ts`가 있다면 기존 작업의 `thread_ts`와 같습니다.
+- `answer` 본문이 비어 있지 않습니다.
+
+유효한 답변이면 해당 작업 상태가 `running`으로 바뀌고 `last_user_reply`에 답변 본문, 답변 메시지 `ts`, 수신 시각이 저장됩니다. `logs/relay_events.jsonl`에는 `user_reply_received` 이벤트가 남습니다.
+
+잘못된 답변이면 자동 실행하지 않습니다. daemon은 메시지 `ts`를 처리 완료로 기록해 중복 처리를 막고, `user_reply_ignored` 이벤트에 무시 이유를 남깁니다.
+
 ## 결과 작성 체크리스트
 
 1. `task_id`가 `inbox`와 같은지 확인합니다.
 2. `thread_ts`가 `inbox`의 값과 같은지 확인합니다.
 3. 작성 중 파일명이 `.pending.md`인지 확인합니다.
 4. `status`가 현재 결과와 맞는지 확인합니다.
-5. `message`에 사용자가 바로 이해할 수 있는 요약, 검증, 남은 위험을 적습니다.
-6. 비밀 값과 토큰이 포함되지 않았는지 확인합니다.
-7. 실제 외부 전송 테스트를 하지 않았으면 그 사실을 명확히 적습니다.
-8. 마지막에 `.md`로 이름을 바꿔 전송 후보로 만듭니다.
+5. 사용자 확인 질문이면 `needs_user: true`와 `status: waiting_for_user`가 함께 있는지 확인합니다.
+6. `message`에 사용자가 바로 이해할 수 있는 요약, 검증, 남은 위험을 적습니다.
+7. 비밀 값과 토큰이 포함되지 않았는지 확인합니다.
+8. 실제 외부 전송 테스트를 하지 않았으면 그 사실을 명확히 적습니다.
+9. 마지막에 `.md`로 이름을 바꿔 전송 후보로 만듭니다.
 
 ## 작업 상태 확인
 
@@ -172,6 +234,7 @@ node src/relay_daemon.js --status
 - `task_file`: `inbox` 작업 파일
 - `result_file`: `outbox` 결과 파일
 - `updated_at`: 마지막 상태 변경 시각
+- `last_user_reply_at`: 마지막 사용자 답변 수신 시각
 - `last_error`: 마지막 오류 요약
 
 상태 의미:
@@ -190,3 +253,9 @@ node src/relay_daemon.js --status
 - Codex app이 항상 자동으로 깨어 있는 것은 아닙니다.
 - 3단계는 반자동 운영입니다. 자동 실행 확대는 이후 단계에서 별도로 검토합니다.
 - `state/tasks.json`은 운영 편의를 위한 최근 상태 저장소입니다. 장기 분석용 기록은 `logs/relay_events.jsonl`을 기준으로 확인합니다.
+
+## 검증된 운영 예시
+
+- `Simple Memo` 기획서는 Notion `Simple Memo` 데이터베이스에서 생성하고 업데이트했습니다.
+- `ConqSpace/SimpleMemo` 코드 저장소에는 README와 테스트 문서를 Git으로 푸시했습니다.
+- Slack 스레드 댓글로 들어온 후속 요청도 relay daemon이 감지해 `inbox` 작업 파일로 변환했고, 결과는 같은 스레드에 전송했습니다.

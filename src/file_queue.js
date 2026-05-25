@@ -17,6 +17,11 @@ class ResultValidationError extends Error {
   }
 }
 
+function parseBooleanValue(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+  return value === "true" || value === "yes" || value === "1";
+}
+
 function ensureRelayDirectories(config) {
   for (const directoryPath of [
     config.inboxDir,
@@ -39,12 +44,12 @@ function sanitizeId(rawValue) {
 }
 
 function extractTaskId(text) {
-  const match = String(text || "").match(/^task_id:\s*(.+)$/im);
+  const match = String(text || "").match(/^(task_id|task\s*id|작업\s*ID|작업\s*아이디)\s*:\s*(.+)$/im);
   if (!match) {
     return "";
   }
 
-  return sanitizeId(match[1]);
+  return sanitizeId(match[2]);
 }
 
 function taskIdFromMessage(message) {
@@ -57,7 +62,15 @@ function taskIdFromMessage(message) {
 }
 
 function stripToCodexPrefix(text) {
-  return String(text || "").replace(/^\s*\[to-codex\]\s*/i, "").trim();
+  return String(text || "")
+    .replace(/^\s*\[to-codex\]\s*/i, "")
+    .replace(/^\s*Codex\s*요청(?:\s|$)/i, "")
+    .replace(/^\s*Codex\s*request(?:\s|$)/i, "")
+    .replace(/^\s*카를로스\s*요청(?:\s|$)/i, "")
+    .replace(/^\s*카를로스에게\s*전달\s*:?\s*/i, "")
+    .replace(/^\s*Carlos\s*request(?:\s|$)/i, "")
+    .replace(/^\s*Codex에게\s*전달할\s*작업입니다\.?\s*/i, "")
+    .trim();
 }
 
 function buildTaskFileContent({ channelId, message, taskId, detectedAt }) {
@@ -155,6 +168,18 @@ function parseKeyValueBlock(lines) {
   return values;
 }
 
+function normalizeResultValues(values) {
+  if (Object.prototype.hasOwnProperty.call(values, "needs_user")) {
+    values.needs_user = parseBooleanValue(values.needs_user);
+  }
+
+  if (values.needs_user === true && !values.status) {
+    values.status = "waiting_for_user";
+  }
+
+  return values;
+}
+
 function parseResultFileContent(content) {
   const text = String(content || "").replace(/^\uFEFF/, "");
   const frontmatterMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -164,7 +189,7 @@ function parseResultFileContent(content) {
     if (!values.message && frontmatterMatch[2].trim()) {
       values.message = frontmatterMatch[2].trim();
     }
-    return values;
+    return normalizeResultValues(values);
   }
 
   const values = parseKeyValueBlock(text.split(/\r?\n/));
@@ -175,7 +200,7 @@ function parseResultFileContent(content) {
     values.message = body;
   }
 
-  return values;
+  return normalizeResultValues(values);
 }
 
 function validateResult(result, fileName) {
@@ -185,14 +210,20 @@ function validateResult(result, fileName) {
   if (missingFields.length > 0) {
     throw new ResultValidationError(fileName, missingFields);
   }
+
+  if (result.needs_user === true && result.status !== "waiting_for_user") {
+    throw new ResultValidationError(fileName, ["status(waiting_for_user)"]);
+  }
 }
 
 function buildSlackResultText(result) {
   const prefix = RESULT_PREFIXES[result.status] || "[codex-result]";
+  const needsUser = result.needs_user === true || result.status === "waiting_for_user";
 
   return `${prefix}
 task_id: ${result.task_id}
 status: ${result.status}
+needs_user: ${needsUser ? "true" : "false"}
 
 message:
 ${result.message}`;
