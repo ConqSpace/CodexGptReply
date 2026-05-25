@@ -33,7 +33,7 @@ Slack-facing alias:
 - 위험한 파일 삭제, 대량 이동, Git push, 외부 전송은 사용자 확인 없이 실행하지 않는다.
 - `logs/`, `state/`, `.env`, `node_modules/`는 저장소에 올리지 않는다.
 - 문서를 읽을 때는 UTF-8로 조회한다.
-- 문서 작업은 Notion 커넥터로 처리하고, 코드 작업은 Git 저장소에서 처리한다. relay daemon은 Notion API를 직접 호출하지 않는다.
+- 문서 작업과 코드 작업은 프로젝트 Git 저장소에서 처리한다. 문서는 보통 `docs/` 아래 Markdown 파일에 둔다.
 
 ## Mode Selection
 
@@ -143,25 +143,24 @@ Use this when the user asks to connect a new project to Slack or add a project-s
 
 Checklist:
 
-1. Confirm the project ID, project name, local repo path, GitHub URL, and Notion target if any.
+1. Confirm the project ID, project name, local repo path, GitHub URL, and default docs path if any.
 2. Ask the user to create or confirm the project Slack channel if it does not exist yet.
 3. Get the Slack channel ID. Prefer the channel ID over the display name.
 4. Ensure the Slack bot is invited to the project channel.
 5. Add or update the project entry in `config/projects.json`.
-6. Do not ask for `NOTION_TOKEN` or `NOTION_DATABASE_ID`; Notion work is handled through the Codex app Notion connector, not the relay daemon.
-7. Set `enabled: true` only after `slackChannelId` is present.
-8. Restart the relay daemon so the new project list is loaded.
-9. Send or ask for a test message in the project channel:
+6. Set `enabled: true` only after `slackChannelId` is present.
+7. Restart the relay daemon so the new project list is loaded.
+8. Send or ask for a test message in the project channel:
 
 ```text
 카를로스에게 전달:
 연결 테스트입니다.
 ```
 
-10. Confirm `inbox/<project_id>/task_*.md` is created.
-11. Create a small test result in `outbox/<project_id>/`.
-12. Confirm the Slack thread receives `[codex-result]`.
-13. Report the channel, project ID, inbox path, outbox path, and test result.
+9. Confirm `inbox/<project_id>/task_*.md` is created.
+10. Create a small test result in `outbox/<project_id>/`.
+11. Confirm the Slack thread receives `[codex-result]`.
+12. Report the channel, project ID, inbox path, outbox path, and test result.
 
 Project config shape:
 
@@ -172,11 +171,7 @@ Project config shape:
   "enabled": true,
   "slackChannelId": "C0123456789",
   "repoPath": "F:\\Antigravity\\SimpleMemo",
-  "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git",
-  "notion": {
-    "mode": "database",
-    "databaseName": "Simple Memo"
-  }
+  "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git"
 }
 ```
 
@@ -313,7 +308,6 @@ When `[to-codex-reply]` is valid, the daemon records `last_user_reply` in `state
 
 Verified workflow:
 
-- Notion `Simple Memo` database was used for planning docs through the Codex app Notion connector.
 - GitHub `ConqSpace/SimpleMemo` was used for README and test file commits.
 - Slack thread replies were detected and answered in the same thread.
 

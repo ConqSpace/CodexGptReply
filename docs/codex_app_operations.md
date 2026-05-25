@@ -7,9 +7,9 @@
 - 작업 확인은 `logs/relay_events.jsonl`과 `inbox/<project_id>/task_<task_id>.md`를 기준으로 합니다.
 - 최근 상태 확인은 `node src/relay_daemon.js --status`를 사용합니다.
 - 실제 Slack 전송은 relay daemon이 담당합니다.
-- 프로젝트별 Slack 채널, 저장소 경로, Notion 대상은 `config/projects.json`에서 관리합니다.
-- 문서 작업은 Codex app의 Notion 커넥터로 처리합니다. relay daemon이 Notion API를 직접 호출하지 않습니다.
-- 코드 작업은 Git 저장소에서 처리합니다. 작업 로그와 결정 사항은 필요하면 Notion에 남깁니다.
+- 프로젝트별 Slack 채널과 저장소 경로는 `config/projects.json`에서 관리합니다.
+- 문서 작업과 코드 작업은 프로젝트 Git 저장소에서 처리합니다.
+- 작업 로그와 결정 사항은 프로젝트 저장소의 `docs/` 아래 Markdown 문서에 남깁니다.
 - 결과 파일은 작성 중에는 `outbox/*.pending.md`로 둡니다.
 - 전송 준비가 끝났을 때만 `outbox/<project_id>/*.md`로 이름을 바꿉니다.
 - 위험한 작업은 바로 실행하지 않고 `[codex-question]` 결과로 사용자 확인을 요청합니다.
@@ -32,7 +32,6 @@ inbox/<project_id>/task_<task_id>.md
 - project_name: <프로젝트 이름>
 - repo_path: <로컬 저장소 경로>
 - github_url: <GitHub 원격 URL>
-- notion_target: <Notion 대상>
 - channel: <Slack 채널 ID>
 - message_ts: <원본 Slack 메시지 ts>
 - thread_ts: <답장할 Slack 스레드 ts>
@@ -49,7 +48,6 @@ inbox/<project_id>/task_<task_id>.md
 - `task_id`: 결과 파일과 로그를 연결하는 식별자입니다.
 - `project_id`: 프로젝트별 채널과 작업 경로를 연결하는 식별자입니다.
 - `repo_path`: 코드 작업을 할 로컬 저장소입니다.
-- `notion_target`: 문서 작업을 할 Notion 대상입니다.
 - `channel`: daemon이 읽은 Slack 채널입니다.
 - `message_ts`: 중복 처리 여부를 판단할 때 쓰는 원본 메시지 시각입니다.
 - `thread_ts`: 결과를 답장할 Slack 스레드입니다. `outbox` 결과 파일에 반드시 복사합니다.
@@ -269,6 +267,6 @@ node src/relay_daemon.js --status
 
 ## 검증된 운영 예시
 
-- `Simple Memo` 기획서는 Notion `Simple Memo` 데이터베이스에서 생성하고 업데이트했습니다.
 - `ConqSpace/SimpleMemo` 코드 저장소에는 README와 테스트 문서를 Git으로 푸시했습니다.
+- Slack 스레드 댓글로 들어온 후속 요청도 relay daemon이 감지해 `inbox` 작업 파일로 변환했고, 결과는 같은 스레드에 전송했습니다.
 - Slack 스레드 댓글로 들어온 후속 요청도 relay daemon이 감지해 `inbox` 작업 파일로 변환했고, 결과는 같은 스레드에 전송했습니다.

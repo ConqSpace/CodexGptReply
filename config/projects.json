@@ -7,10 +7,7 @@
       "enabled": true,
       "slackChannelId": "C0B6QN775FA",
       "repoPath": "F:\\Antigravity\\CodexGptRelay",
-      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git",
-      "notion": {
-        "mode": "none"
-      }
+      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git"
     },
     {
       "id": "simple-memo",
@@ -18,11 +15,15 @@
       "enabled": false,
       "slackChannelId": "",
       "repoPath": "F:\\Antigravity\\SimpleMemo",
-      "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git",
-      "notion": {
-        "mode": "database",
-        "databaseName": "Simple Memo"
-      }
+      "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git"
+    },
+    {
+      "id": "iorm",
+      "name": "Invitation of the Red Moon",
+      "enabled": true,
+      "slackChannelId": "C0B5YUR6ZPT",
+      "repoPath": "F:\\Antigravity\\Invitation-of-the-Red-Moon",
+      "githubUrl": "https://github.com/macian-games/Invitation-of-the-Red-Moon"
     }
   ]
 }

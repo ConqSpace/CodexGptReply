@@ -13,7 +13,7 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 - 로컬 데몬은 Slack 메시지를 감지하고 `inbox` 작업 파일로 변환합니다.
 - 데몬은 `outbox` 결과 파일을 Slack 스레드에 구조화된 답장으로 전송합니다.
 - GPT는 Slack 답장을 읽고 사용자에게 다시 전달합니다.
-- 프로젝트별 Slack 채널을 분리하고, 문서 작업은 Codex app의 Notion 커넥터에서, 코드 작업은 Git 저장소에서 처리합니다.
+- 프로젝트별 Slack 채널을 분리하고, 문서와 코드는 각 프로젝트 Git 저장소에서 처리합니다.
 
 ## 현재 범위
 
@@ -25,7 +25,7 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 - `inbox`, `outbox`, `outbox/sent`, `state`, `logs` 디렉터리를 필요할 때 만듭니다.
 - 사람이 작성한 `outbox/<project_id>/*.md` 결과 파일만 전송 후보로 봅니다.
 - 작성 중인 `outbox/*.pending.md` 파일은 무시합니다.
-- Notion 문서 생성/수정은 Codex app의 Notion 커넥터로 처리합니다. 데몬은 Notion API를 직접 호출하지 않습니다.
+- 문서 작업은 프로젝트 저장소의 Markdown 파일에서 처리합니다.
 - Codex 자동 실행은 이후 단계입니다.
 
 ## 동작 흐름
@@ -44,14 +44,16 @@ GPT
 -> GPT
 ```
 
-문서와 코드는 아래처럼 나눕니다.
+문서와 코드는 각 프로젝트 Git 저장소에 둡니다.
 
 ```text
-Notion
--> 기획서, 로드맵, 의사결정, 작업 로그
-
 Git
--> 실행 코드, README, 템플릿, skill, 테스트
+-> 실행 코드
+-> README
+-> docs/product_plan.md
+-> docs/roadmap.md
+-> docs/decisions.md
+-> docs/task_log.md
 ```
 
 사용자 확인이 필요한 작업은 아래 흐름을 사용합니다.
@@ -100,10 +102,7 @@ SLACK_HISTORY_LIMIT=20
       "enabled": true,
       "slackChannelId": "C0B6QN775FA",
       "repoPath": "F:\\Antigravity\\CodexGptRelay",
-      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git",
-      "notion": {
-        "mode": "none"
-      }
+      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git"
     }
   ]
 }
@@ -161,8 +160,8 @@ npm start
 
 ```text
 카를로스에게 전달:
-Simple Memo 기획서 초안을 Notion에 작성해줘.
-코드 작업은 하지 말고 문서만 만들어줘.
+Simple Memo 기획서 초안을 docs/product_plan.md에 작성해줘.
+코드 작업은 하지 말고 문서만 업데이트해줘.
 ```
 
 `task_id`는 선택입니다. 없으면 데몬이 Slack 메시지 `ts`를 바탕으로 `slack-<ts>` 형태의 작업 ID를 자동 생성합니다.
@@ -207,7 +206,7 @@ Request:
 Codex relay 테스트 응답을 보내줘.
 ```
 
-데몬은 `inbox/<project_id>/task_test-001.md` 작업 파일을 만듭니다. 작업 파일에는 프로젝트 ID, 저장소 경로, Notion 대상, 채널, 원본 메시지 `ts`, 스레드 `ts`, 작성자, 감지 시각, 원문 요청이 포함됩니다.
+데몬은 `inbox/<project_id>/task_test-001.md` 작업 파일을 만듭니다. 작업 파일에는 프로젝트 ID, 저장소 경로, 채널, 원본 메시지 `ts`, 스레드 `ts`, 작성자, 감지 시각, 원문 요청이 포함됩니다.
 
 Codex app 또는 사람이 작업을 마친 뒤 `outbox/<project_id>`에는 아래처럼 결과 파일을 작성합니다. 작성 중에는 `.pending.md` 확장자를 사용하고, 완료되면 `.md`로 이름을 바꿉니다.
 
@@ -370,11 +369,10 @@ $codex-gpt-relay로 relay 한 번 확인해줘.
 ## 현재 한계
 
 - 실제 Codex app 작업 처리는 사람이 수행합니다.
-- Notion 작업은 Codex app 커넥터로 처리합니다. 데몬은 Slack과 파일 큐만 담당합니다.
 - 현재 방식은 `config/projects.json`의 활성 프로젝트 채널을 순회하며 Slack `conversations.history`와 `conversations.replies`를 폴링합니다. 더 빠른 반응이 필요하면 나중에 Socket Mode 전환을 검토합니다.
 
 ## 검증된 테스트
 
-- `Simple Memo` Notion 데이터베이스에 기획서를 생성하고 여러 차례 업데이트했습니다.
+- `Simple Memo` 저장소에 README와 테스트 문서를 작성하고 푸시했습니다.
 - Slack 스레드 댓글로 들어온 후속 요청을 감지해 같은 스레드에 결과를 보냈습니다.
 - `ConqSpace/SimpleMemo` 저장소를 만들고 README와 테스트 문서를 푸시했습니다.

@@ -88,8 +88,6 @@ function buildTaskFileContent({ channelId, message, taskId, detectedAt, project 
   const projectName = project && project.name ? project.name : projectId;
   const repoPath = project && project.repoPath ? project.repoPath : "";
   const githubUrl = project && project.githubUrl ? project.githubUrl : "";
-  const notion = project && project.notion ? project.notion : { mode: "none" };
-  const notionTarget = notion.databaseName || notion.pageName || notion.mode || "none";
 
   return `# Codex 작업 요청
 
@@ -98,7 +96,6 @@ function buildTaskFileContent({ channelId, message, taskId, detectedAt, project 
 - project_name: ${projectName}
 - repo_path: ${repoPath}
 - github_url: ${githubUrl}
-- notion_target: ${notionTarget}
 - channel: ${channelId}
 - message_ts: ${message.ts}
 - thread_ts: ${threadTs}

@@ -91,7 +91,6 @@ function normalizeProject(rawProject) {
     slackChannelId: String(rawProject && rawProject.slackChannelId ? rawProject.slackChannelId : ""),
     repoPath: String(rawProject && rawProject.repoPath ? rawProject.repoPath : ""),
     githubUrl: String(rawProject && rawProject.githubUrl ? rawProject.githubUrl : ""),
-    notion: rawProject && rawProject.notion && typeof rawProject.notion === "object" ? rawProject.notion : { mode: "none" },
   };
 }
 
@@ -108,7 +107,6 @@ function loadConfig() {
     slackChannelId: mergedEnv.SLACK_CHANNEL_ID || "C0B6QN775FA",
     repoPath: PROJECT_ROOT,
     githubUrl: "",
-    notion: { mode: "none" },
   });
   const projectsConfig = readProjectsFile(path.join(PROJECT_ROOT, "config", "projects.json"), fallbackProject);
   const enabledProjects = projectsConfig.projects.filter((project) => project.enabled && project.slackChannelId);
