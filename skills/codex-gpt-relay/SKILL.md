@@ -148,19 +148,20 @@ Checklist:
 3. Get the Slack channel ID. Prefer the channel ID over the display name.
 4. Ensure the Slack bot is invited to the project channel.
 5. Add or update the project entry in `config/projects.json`.
-6. Set `enabled: true` only after `slackChannelId` is present.
-7. Restart the relay daemon so the new project list is loaded.
-8. Send or ask for a test message in the project channel:
+6. Do not ask for `NOTION_TOKEN` or `NOTION_DATABASE_ID`; Notion work is handled through the Codex app Notion connector, not the relay daemon.
+7. Set `enabled: true` only after `slackChannelId` is present.
+8. Restart the relay daemon so the new project list is loaded.
+9. Send or ask for a test message in the project channel:
 
 ```text
 카를로스에게 전달:
 연결 테스트입니다.
 ```
 
-9. Confirm `inbox/<project_id>/task_*.md` is created.
-10. Create a small test result in `outbox/<project_id>/`.
-11. Confirm the Slack thread receives `[codex-result]`.
-12. Report the channel, project ID, inbox path, outbox path, and test result.
+10. Confirm `inbox/<project_id>/task_*.md` is created.
+11. Create a small test result in `outbox/<project_id>/`.
+12. Confirm the Slack thread receives `[codex-result]`.
+13. Report the channel, project ID, inbox path, outbox path, and test result.
 
 Project config shape:
 
