@@ -4,13 +4,14 @@
 
 ## 운영 원칙
 
-- 작업 확인은 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`를 기준으로 합니다.
+- 작업 확인은 `logs/relay_events.jsonl`과 `inbox/<project_id>/task_<task_id>.md`를 기준으로 합니다.
 - 최근 상태 확인은 `node src/relay_daemon.js --status`를 사용합니다.
 - 실제 Slack 전송은 relay daemon이 담당합니다.
+- 프로젝트별 Slack 채널, 저장소 경로, Notion 대상은 `config/projects.json`에서 관리합니다.
 - 문서 작업은 Codex app의 Notion 커넥터로 처리합니다. relay daemon이 Notion API를 직접 호출하지 않습니다.
 - 코드 작업은 Git 저장소에서 처리합니다. 작업 로그와 결정 사항은 필요하면 Notion에 남깁니다.
 - 결과 파일은 작성 중에는 `outbox/*.pending.md`로 둡니다.
-- 전송 준비가 끝났을 때만 `outbox/*.md`로 이름을 바꿉니다.
+- 전송 준비가 끝났을 때만 `outbox/<project_id>/*.md`로 이름을 바꿉니다.
 - 위험한 작업은 바로 실행하지 않고 `[codex-question]` 결과로 사용자 확인을 요청합니다.
 
 ## inbox 작업 파일 형식
@@ -18,7 +19,7 @@
 파일 위치:
 
 ```text
-inbox/task_<task_id>.md
+inbox/<project_id>/task_<task_id>.md
 ```
 
 현재 daemon이 생성하는 기본 형식:
@@ -27,6 +28,11 @@ inbox/task_<task_id>.md
 # Codex 작업 요청
 
 - task_id: <작업 ID>
+- project_id: <프로젝트 ID>
+- project_name: <프로젝트 이름>
+- repo_path: <로컬 저장소 경로>
+- github_url: <GitHub 원격 URL>
+- notion_target: <Notion 대상>
 - channel: <Slack 채널 ID>
 - message_ts: <원본 Slack 메시지 ts>
 - thread_ts: <답장할 Slack 스레드 ts>
@@ -41,6 +47,9 @@ inbox/task_<task_id>.md
 필드 의미:
 
 - `task_id`: 결과 파일과 로그를 연결하는 식별자입니다.
+- `project_id`: 프로젝트별 채널과 작업 경로를 연결하는 식별자입니다.
+- `repo_path`: 코드 작업을 할 로컬 저장소입니다.
+- `notion_target`: 문서 작업을 할 Notion 대상입니다.
 - `channel`: daemon이 읽은 Slack 채널입니다.
 - `message_ts`: 중복 처리 여부를 판단할 때 쓰는 원본 메시지 시각입니다.
 - `thread_ts`: 결과를 답장할 Slack 스레드입니다. `outbox` 결과 파일에 반드시 복사합니다.
@@ -53,8 +62,8 @@ inbox/task_<task_id>.md
 파일 위치:
 
 ```text
-outbox/<task_id>.pending.md
-outbox/<task_id>.md
+outbox/<project_id>/<task_id>.pending.md
+outbox/<project_id>/<task_id>.md
 ```
 
 작성 중에는 `.pending.md`를 사용합니다. relay daemon은 `.pending.md` 파일을 전송 후보로 보지 않습니다. 검토가 끝난 뒤 같은 내용을 `.md`로 이름 변경하면 Slack 전송 후보가 됩니다.
@@ -62,6 +71,7 @@ outbox/<task_id>.md
 필수 필드:
 
 - `task_id`: `inbox` 작업 파일의 `task_id`와 같아야 합니다.
+- `project_id`: 권장 필드입니다. 파일 위치의 `<project_id>`와 같아야 합니다.
 - `status`: `completed`, `failed`, `waiting_for_user`, `running` 중 하나를 사용합니다.
 - `needs_user`: 사용자 확인이 필요하면 `true`, 아니면 `false`를 사용합니다. `needs_user: true`인데 `status`가 없으면 daemon은 `waiting_for_user`로 취급합니다.
 - `thread_ts`: `inbox` 작업 파일의 `thread_ts` 값을 그대로 사용합니다.
@@ -71,6 +81,7 @@ outbox/<task_id>.md
 
 ```text
 task_id: <작업 ID>
+project_id: <프로젝트 ID>
 status: completed
 needs_user: false
 thread_ts: <Slack 스레드 ts>
@@ -114,14 +125,14 @@ daemon은 `status`에 따라 Slack 접두사를 붙입니다.
 
 1. `logs/relay_events.jsonl`의 마지막 줄부터 확인합니다.
 2. `event: "task_created"`가 있는지 확인합니다.
-3. `task_id`, `task_file`, `thread_ts`, `message_ts`를 기록합니다.
-4. `inbox/<task_file>`을 UTF-8로 읽습니다.
+3. `project_id`, `task_id`, `task_file`, `thread_ts`, `message_ts`를 기록합니다.
+4. `inbox/<project_id>/<task_file>`을 UTF-8로 읽습니다.
 5. 같은 `task_id`의 결과가 이미 `outbox`, `outbox/sent`에 있는지 확인합니다.
 6. 요청이 현재 허용 범위 안에 있는지 판단합니다.
 7. 위험하거나 범위가 불명확하면 작업을 실행하지 않고 `[codex-question]` 결과를 작성합니다.
 8. 작업을 수행했다면 검증 결과와 남은 위험을 함께 정리합니다.
-9. `templates/outbox_result.pending.md`를 복사해 `outbox/<task_id>.pending.md`로 작성합니다.
-10. 필수 필드와 본문을 다시 확인한 뒤 `outbox/<task_id>.md`로 이름을 바꿉니다.
+9. `templates/outbox_result.pending.md`를 복사해 `outbox/<project_id>/<task_id>.pending.md`로 작성합니다.
+10. 필수 필드와 본문을 다시 확인한 뒤 `outbox/<project_id>/<task_id>.md`로 이름을 바꿉니다.
 
 ## 위험한 작업 질문 규칙
 
@@ -139,6 +150,7 @@ daemon은 `status`에 따라 Slack 접두사를 붙입니다.
 
 ```text
 task_id: <작업 ID>
+project_id: <프로젝트 ID>
 status: waiting_for_user
 needs_user: true
 thread_ts: <Slack 스레드 ts>
@@ -149,7 +161,7 @@ message: |
   삭제 대상 파일 목록과 되돌릴 방법을 확인해도 될까요?
 ```
 
-이 파일이 `outbox/<task_id>.md`로 준비되면 daemon은 Slack 스레드에 `[codex-question]`으로 답장합니다.
+이 파일이 `outbox/<project_id>/<task_id>.md`로 준비되면 daemon은 Slack 스레드에 `[codex-question]`으로 답장합니다.
 
 ## 사용자 답변 처리
 
@@ -228,6 +240,7 @@ node src/relay_daemon.js --status
 출력에는 토큰이나 `.env` 값이 포함되지 않습니다. 다음 정보만 표시합니다.
 
 - `task_id`: 작업 식별자
+- `project_id`: 프로젝트 식별자
 - `status`: 현재 작업 상태
 - `message_ts`: 원본 Slack 메시지 시각
 - `thread_ts`: 답장 대상 Slack 스레드 시각
@@ -240,7 +253,7 @@ node src/relay_daemon.js --status
 상태 의미:
 
 - `queued`: Slack 요청을 감지해 `inbox` 작업 파일을 만든 상태입니다.
-- `outbox_ready`: `outbox/*.md` 결과 파일을 읽어 전송 후보로 확인한 상태입니다.
+- `outbox_ready`: `outbox/<project_id>/*.md` 결과 파일을 읽어 전송 후보로 확인한 상태입니다.
 - `posted`: Slack 스레드 답장 전송과 전송 완료 기록이 끝난 상태입니다.
 - `failed`: 결과 파일 형식 오류 등으로 처리에 실패한 상태입니다.
 - `waiting_for_user`: Codex app이 사용자 확인 질문을 남긴 상태입니다.

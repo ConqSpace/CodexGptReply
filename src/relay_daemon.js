@@ -162,10 +162,15 @@ function parseReplyMessage(message) {
   };
 }
 
-function buildReplyIgnoredEvent({ channelId, message, reason, taskId, expectedThreadTs, actualThreadTs }) {
+function messageStoreKey(channelId, messageTs) {
+  return `${channelId}:${messageTs}`;
+}
+
+function buildReplyIgnoredEvent({ channelId, message, reason, taskId, expectedThreadTs, actualThreadTs, project }) {
   return {
     event: "user_reply_ignored",
     ignored_at: new Date().toISOString(),
+    project_id: project ? project.id : "",
     channel: channelId,
     ts: message.ts || "",
     task_id: taskId || "",
@@ -175,12 +180,14 @@ function buildReplyIgnoredEvent({ channelId, message, reason, taskId, expectedTh
   };
 }
 
-function buildEventRecord({ channelId, message, dryRun }) {
+function buildEventRecord({ channelId, message, dryRun, project }) {
   const detectedAt = new Date().toISOString();
 
   return {
     event: "to_codex_message_detected",
     detected_at: detectedAt,
+    project_id: project ? project.id : "",
+    project_name: project ? project.name : "",
     channel: channelId,
     ts: message.ts,
     author: message.user || message.bot_id || "unknown",
@@ -195,6 +202,8 @@ function buildTaskCreatedEvent({ eventRecord, taskFile }) {
   return {
     event: "task_created",
     detected_at: eventRecord.detected_at,
+    project_id: eventRecord.project_id || "",
+    project_name: eventRecord.project_name || "",
     task_id: taskFile.taskId,
     task_file: taskFile.fileName,
     task_file_created: taskFile.created,
@@ -238,6 +247,7 @@ function printStatus({ taskStore, processedStore, postedStore }) {
     console.log(
       [
         `task_id=${task.task_id}`,
+        `project_id=${task.project_id || "-"}`,
         `status=${task.status}`,
         `message_ts=${task.message_ts || "-"}`,
         `thread_ts=${task.thread_ts || "-"}`,
@@ -354,7 +364,7 @@ function validateReply({ parsedReply, message, taskStore }) {
   };
 }
 
-function processReplyMessage({ config, message, processedStore, taskStore }) {
+function processReplyMessage({ config, project, message, processedStore, taskStore }) {
   const parsedReply = parseReplyMessage(message);
   const validation = validateReply({ parsedReply, message, taskStore });
 
@@ -368,9 +378,10 @@ function processReplyMessage({ config, message, processedStore, taskStore }) {
         taskId: parsedReply.task_id,
         expectedThreadTs: validation.task ? validation.task.thread_ts : "",
         actualThreadTs: validation.actualThreadTs,
+        project,
       })
     );
-    processedStore.add(message.ts);
+    processedStore.add(messageStoreKey(project.slackChannelId, message.ts));
     console.log(`사용자 답변 무시: ts=${message.ts}, reason=${validation.reason}`);
     return false;
   }
@@ -382,25 +393,31 @@ function processReplyMessage({ config, message, processedStore, taskStore }) {
     received_at: receivedAt,
   });
 
-  processedStore.add(message.ts);
+  processedStore.add(messageStoreKey(project.slackChannelId, message.ts));
   console.log(`사용자 답변 수신: task_id=${parsedReply.task_id}, ts=${message.ts}`);
   return true;
 }
 
-async function processMessages({ config, slackClient, processedStore, taskStore, options }) {
-  const messages = await collectMessagesForProcessing({ config, slackClient });
+async function processProjectMessages({ config, project, slackClient, processedStore, taskStore, options }) {
+  const projectConfig = {
+    ...config,
+    slackChannelId: project.slackChannelId,
+  };
+  const messages = await collectMessagesForProcessing({ config: projectConfig, slackClient });
 
   let processedCount = 0;
   const orderedMessages = messages;
 
   for (const message of orderedMessages) {
-    if (!message.ts || processedStore.has(message.ts)) {
+    const storeKey = message.ts ? messageStoreKey(project.slackChannelId, message.ts) : "";
+    if (!message.ts || processedStore.has(storeKey) || processedStore.has(message.ts)) {
       continue;
     }
 
     if (isToCodexReplyMessage(message)) {
       processReplyMessage({
-        config,
+        config: projectConfig,
+        project,
         message,
         processedStore,
         taskStore,
@@ -414,23 +431,26 @@ async function processMessages({ config, slackClient, processedStore, taskStore,
     }
 
     const eventRecord = buildEventRecord({
-      channelId: config.slackChannelId,
+      channelId: project.slackChannelId,
       message,
       dryRun: options.dryRun,
+      project,
     });
     appendJsonLine(config.logFilePath, eventRecord);
 
     const taskFile = createInboxTaskFile({
       config,
-      channelId: config.slackChannelId,
+      channelId: project.slackChannelId,
       message,
       detectedAt: eventRecord.detected_at,
+      project,
     });
     appendJsonLine(config.logFilePath, buildTaskCreatedEvent({ eventRecord, taskFile }));
 
     const threadTs = message.thread_ts || message.ts;
     if (taskStore && typeof taskStore.transition === "function") {
       taskStore.transition(taskFile.taskId, "queued", {
+        project_id: project.id,
         message_ts: message.ts,
         thread_ts: threadTs,
         task_file: taskFile.fileName,
@@ -439,9 +459,26 @@ async function processMessages({ config, slackClient, processedStore, taskStore,
       });
     }
 
-    processedStore.add(message.ts);
+    processedStore.add(storeKey);
     processedCount += 1;
     console.log(`작업 파일 생성 완료: task_id=${taskFile.taskId}, ts=${message.ts}, thread_ts=${threadTs}`);
+  }
+
+  return processedCount;
+}
+
+async function processMessages({ config, slackClient, processedStore, taskStore, options }) {
+  let processedCount = 0;
+
+  for (const project of config.projects) {
+    processedCount += await processProjectMessages({
+      config,
+      project,
+      slackClient,
+      processedStore,
+      taskStore,
+      options,
+    });
   }
 
   return processedCount;
@@ -468,7 +505,7 @@ async function main() {
 
   const slackClient = new SlackClient({ token: config.slackBotToken });
 
-  console.log(`CodexGptRelay 시작: channel=${config.slackChannelId}, interval=${config.pollIntervalMs}ms, dryRun=${options.dryRun}`);
+  console.log(`CodexGptRelay 시작: projects=${config.projects.map((project) => `${project.id}:${project.slackChannelId}`).join(", ")}, interval=${config.pollIntervalMs}ms, dryRun=${options.dryRun}`);
 
   while (true) {
     try {

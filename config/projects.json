@@ -1,0 +1,28 @@
+{
+  "defaultProjectId": "codex-gpt-relay",
+  "projects": [
+    {
+      "id": "codex-gpt-relay",
+      "name": "CodexGptRelay",
+      "enabled": true,
+      "slackChannelId": "C0B6QN775FA",
+      "repoPath": "F:\\Antigravity\\CodexGptRelay",
+      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git",
+      "notion": {
+        "mode": "none"
+      }
+    },
+    {
+      "id": "simple-memo",
+      "name": "Simple Memo",
+      "enabled": false,
+      "slackChannelId": "",
+      "repoPath": "F:\\Antigravity\\SimpleMemo",
+      "githubUrl": "https://github.com/ConqSpace/SimpleMemo.git",
+      "notion": {
+        "mode": "database",
+        "databaseName": "Simple Memo"
+      }
+    }
+  ]
+}

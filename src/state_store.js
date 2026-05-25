@@ -102,6 +102,7 @@ class PostedResultStore {
 function createEmptyTask(taskId) {
   return {
     task_id: taskId,
+    project_id: "",
     status: "queued",
     message_ts: "",
     thread_ts: "",
@@ -133,6 +134,7 @@ function normalizeTask(rawTask) {
     ...task,
     ...rawTask,
     task_id: taskId,
+    project_id: String(rawTask && rawTask.project_id ? rawTask.project_id : ""),
     status: TASK_STATUSES.has(rawTask && rawTask.status) ? rawTask.status : task.status,
     message_ts: String(rawTask && rawTask.message_ts ? rawTask.message_ts : ""),
     thread_ts: String(rawTask && rawTask.thread_ts ? rawTask.thread_ts : ""),
@@ -216,6 +218,7 @@ class TaskStore {
       event: "task_status_changed",
       changed_at: now,
       task_id: taskId,
+      project_id: nextTask.project_id,
       from_status: previousStatus,
       to_status: nextStatus,
       message_ts: nextTask.message_ts,

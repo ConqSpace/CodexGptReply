@@ -10,7 +10,7 @@ Slack App의 Bot Token Scopes에 다음 권한을 추가합니다.
 
 스레드 댓글 조회에 `replies`라는 별도 권한은 없습니다. 공개 채널에서는 `conversations.replies`도 `channels:history` 권한으로 조회합니다. 비공개 채널, DM, 멀티 DM으로 확장할 때는 각각 `groups:history`, `im:history`, `mpim:history`가 필요합니다.
 
-권한을 바꾼 뒤에는 Slack App을 워크스페이스에 다시 설치해야 합니다. 그리고 Bot을 `#codex-gpt` 채널에 초대합니다.
+권한을 바꾼 뒤에는 Slack App을 워크스페이스에 다시 설치해야 합니다. 그리고 Bot을 각 프로젝트 채널에 초대합니다.
 
 ## 로컬 설정
 
@@ -19,10 +19,11 @@ Slack App의 Bot Token Scopes에 다음 권한을 추가합니다.
 
 ```env
 SLACK_BOT_TOKEN=xoxb-your-token-here
-SLACK_CHANNEL_ID=C0B6QN775FA
 POLL_INTERVAL_MS=10000
 SLACK_HISTORY_LIMIT=20
 ```
+
+`SLACK_CHANNEL_ID`는 단일 채널 fallback으로만 사용합니다. 새 프로젝트 채널은 `config/projects.json`의 `projects[*].slackChannelId`에 적습니다.
 
 ## 실행 명령
 
@@ -38,18 +39,18 @@ node src/relay_daemon.js --once --dry-run
 node src/relay_daemon.js --once
 ```
 
-한 번만 Slack 메시지를 읽고, `[to-codex]` 메시지를 `inbox` 작업 파일로 변환합니다. 처리할 `outbox/*.md` 결과 파일이 있으면 같은 Slack 스레드에 답장을 전송합니다.
+한 번만 Slack 메시지를 읽고, 지원 접두사 메시지를 `inbox/<project_id>` 작업 파일로 변환합니다. 처리할 `outbox/<project_id>/*.md` 결과 파일이 있으면 같은 Slack 스레드에 답장을 전송합니다.
 
 ```powershell
 node src/relay_daemon.js
 ```
 
-10초마다 `conversations.history`를 호출합니다. 스레드 댓글이 있는 메시지는 `conversations.replies`를 추가 호출해 댓글까지 확인합니다. Slack API가 `429`를 반환하면 `Retry-After` 값만큼 기다린 뒤 다시 시도합니다.
+10초마다 활성 프로젝트의 Slack 채널마다 `conversations.history`를 호출합니다. 스레드 댓글이 있는 메시지는 `conversations.replies`를 추가 호출해 댓글까지 확인합니다. Slack API가 `429`를 반환하면 `Retry-After` 값만큼 기다린 뒤 다시 시도합니다.
 
 ## 생성되는 로컬 파일
 
-- `inbox/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋은 작업 파일로 저장합니다.
-- `outbox/*.md`: Slack 스레드에 전송할 결과 파일입니다.
+- `inbox/<project_id>/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋은 작업 파일로 저장합니다.
+- `outbox/<project_id>/*.md`: Slack 스레드에 전송할 결과 파일입니다.
 - `outbox/*.pending.md`: 작성 중인 결과 파일입니다. 데몬은 이 파일을 무시합니다.
 - `outbox/sent/*.md`: Slack 전송 성공 뒤 이동된 결과 파일입니다.
 - `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지와 `task_created` 이벤트를 줄 단위 JSON으로 저장합니다.
@@ -80,6 +81,7 @@ README의 2단계 파일 큐 설명을 확인해줘.
 결과 파일은 먼저 `.pending.md`로 작성한 뒤, 완성되면 `.md`로 이름을 바꿉니다.
 
 ```text
+project_id: codex-gpt-relay
 task_id: test-001
 status: completed
 thread_ts: 1710000000.000000

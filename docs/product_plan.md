@@ -12,7 +12,7 @@ CodexGptRelay는 GPT와 Codex 사이의 대화를 Slack으로 중계하는 반�
 
 사용자는 GPT에게 자연어로 요청합니다.
 
-GPT는 요청을 Codex가 처리하기 쉬운 작업 메시지로 바꿔 Slack `#codex-gpt` 채널에 보냅니다.
+GPT는 요청을 Codex가 처리하기 쉬운 작업 메시지로 바꿔 프로젝트별 Slack 채널에 보냅니다.
 
 Slack relay daemon은 해당 메시지를 감지합니다. 메시지가 `[to-codex]`로 시작하면 작업으로 등록하고 `inbox`에 작업 파일을 생성합니다.
 
@@ -40,7 +40,7 @@ GPT는 Slack 답장을 읽고 사용자에게 필요한 부분만 다시 설명�
 ### Slack relay daemon
 
 - Slack Web API를 사용합니다.
-- `#codex-gpt` 채널을 짧은 주기로 확인합니다.
+- 프로젝트별 Slack 채널을 짧은 주기로 확인합니다.
 - `[to-codex]` 메시지만 `inbox` 작업 파일로 변환합니다.
 - `outbox` 결과 파일을 Slack 스레드 답장으로 전송합니다.
 - Slack 토큰, 채널 ID, 처리 완료 메시지 목록을 관리합니다.
@@ -63,7 +63,7 @@ GPT는 Slack 답장을 읽고 사용자에게 필요한 부분만 다시 설명�
 ```text
 사용자
 -> GPT
--> Slack #codex-gpt [to-codex]
+-> 프로젝트별 Slack 채널 [to-codex]
 -> Codex relay daemon
 -> inbox/task.md 생성
 -> Codex app이 로그와 작업 파일 확인
@@ -136,7 +136,7 @@ Slack 메시지를 읽었고 inbox 작업 파일을 생성했습니다.
 
 ### Slack 감시기
 
-- Slack Web API를 사용해 `#codex-gpt` 채널을 주기적으로 읽습니다.
+- Slack Web API를 사용해 프로젝트별 Slack 채널을 주기적으로 읽습니다.
 - 1차 구현에서는 10초 폴링을 기본값으로 사용합니다.
 - `[to-codex]` 메시지만 작업으로 등록합니다.
 - `[codex-result]`, `[codex-question]`, `[codex-status]` 메시지는 무시합니다.
@@ -152,7 +152,7 @@ Slack 메시지를 읽었고 inbox 작업 파일을 생성했습니다.
 ### 파일 큐
 
 - `inbox/*.md`: Slack 요청을 사람이 읽기 쉬운 작업 파일로 저장합니다.
-- `outbox/*.md`: Codex app이 작성한 Slack 답장 후보를 저장합니다.
+- `outbox/<project_id>/*.md`: Codex app이 작성한 Slack 답장 후보를 저장합니다.
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지를 저장합니다.
 - `state/posted_results.json`: 이미 Slack에 전송한 결과 파일을 저장합니다.
 - `logs/relay_events.jsonl`: 데몬과 작업 상태 변화를 줄 단위 JSON으로 저장합니다.

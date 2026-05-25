@@ -1,4 +1,5 @@
 task_id: <inbox의 task_id>
+project_id: <inbox의 project_id>
 status: waiting_for_user
 needs_user: true
 thread_ts: <inbox의 thread_ts>

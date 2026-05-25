@@ -1,6 +1,6 @@
 ---
 name: codex-gpt-relay
-description: Use when operating, testing, or monitoring the local CodexGptRelay project that connects GPT and Codex through Slack #codex-gpt, including short relay checks, Slack Web API daemon verification, inbox/outbox workflow planning, and long-running relay log monitoring.
+description: Use when operating, testing, or monitoring the local CodexGptRelay project that connects GPT and Codex through project-specific Slack channels, including short relay checks, Slack Web API daemon verification, inbox/outbox workflow planning, and long-running relay log monitoring.
 ---
 
 # Codex GPT Relay
@@ -12,7 +12,7 @@ Its purpose is to let the user stay mostly in GPT while Slack carries messages b
 Core flow:
 
 ```text
-GPT -> Slack #codex-gpt "카를로스에게 전달:" -> relay daemon -> Codex work -> [codex-result]
+GPT -> project Slack channel "카를로스에게 전달:" -> relay daemon -> Codex work -> [codex-result]
 Codex question -> Slack [codex-question] -> GPT/user answer -> Slack [to-codex-reply] -> relay daemon resumes task
 ```
 
@@ -21,7 +21,8 @@ Slack-facing alias:
 - `카를로스`: Codex-side worker
 - `조지`: GPT-side user-facing relay
 - Prefer `카를로스에게 전달:` and `카를로스에게 답변:` when GPT's Slack sender blocks machine-style tags.
-- `task_id` is optional for requests. If omitted, the daemon creates `slack-<message ts>`.
+- `task_id` is optional for requests. If omitted, the daemon creates `<project id>-slack-<message ts>`.
+- Project channels are configured in `config/projects.json`; `.env` should keep secrets such as `SLACK_BOT_TOKEN`.
 - Thread replies are supported. The daemon reads channel parents with `conversations.history` and expands parents with replies using `conversations.replies`.
 
 ## Safety Rules
@@ -105,13 +106,13 @@ Checklist:
 3. Watch these files and summarize only meaningful changes:
    - `logs/relay_events.jsonl`
    - `state/processed_messages.json`
-   - later phases: `inbox/`, `outbox/`
+   - `inbox/<project_id>/`, `outbox/<project_id>/`
 4. Do not spend tokens on empty loops. Use shell reads or file timestamps first.
 5. When a new actionable event appears:
    - identify `ts`, `thread_ts`, `task_id` if present
    - read the request
    - decide whether it is safe to answer, needs user confirmation, or should be ignored
-   - 결과를 준비할 때 `templates/outbox_result.pending.md`를 `outbox/<task_id>.pending.md`로 복사한다.
+   - 결과를 준비할 때 `templates/outbox_result.pending.md`를 `outbox/<project_id>/<task_id>.pending.md`로 복사한다.
    - 작성 중에는 `.pending.md`로 유지하고, relay daemon이 전송해도 될 때만 `.md`로 이름을 바꾼다.
 6. For results, use one of these prefixes:
    - `[codex-result]`
@@ -121,11 +122,12 @@ Checklist:
 파일 큐 운영:
 
 - `inbox`와 `outbox` 작업을 처리하기 전에 `docs/codex_app_operations.md`를 읽는다.
-- 새 작업의 기준 자료는 `logs/relay_events.jsonl`과 `inbox/task_<task_id>.md`로 본다.
+- 새 작업의 기준 자료는 `logs/relay_events.jsonl`과 `inbox/<project_id>/task_<task_id>.md`로 본다.
 - 모든 `outbox` 결과 파일에는 `inbox` 작업 파일의 `thread_ts`를 그대로 복사한다.
+- 결과 파일은 `outbox/<project_id>/<task_id>.pending.md`로 작성하고 최종 전송 시 `.md`로 바꾼다.
 - `outbox` 필수 필드는 `task_id`, `status`, `thread_ts`, `message`이다. 사용자 확인이 필요하면 `needs_user: true`도 적는다.
 - 위험하거나 불명확한 작업은 `status: waiting_for_user`와 `needs_user: true`를 사용해 daemon이 `[codex-question]`으로 답하게 한다.
-- 결과가 완성되고 전송해도 안전하다고 판단하기 전에는 최종 `outbox/*.md` 파일을 만들지 않는다.
+- 결과가 완성되고 전송해도 안전하다고 판단하기 전에는 최종 `outbox/<project_id>/*.md` 파일을 만들지 않는다.
 - 사용자 답변은 `[to-codex-reply]` 메시지로 들어온다. `task_id`가 없으면 같은 Slack 스레드의 기존 작업을 찾고, Slack 스레드가 기존 작업과 다르면 무시된다.
 
 Stop or ask the user when:

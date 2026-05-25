@@ -9,20 +9,21 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 ## 목표
 
 - 사용자는 가능하면 GPT 화면에 머무릅니다.
-- GPT는 Slack `#codex-gpt` 채널에 Codex용 요청을 남깁니다.
+- GPT는 프로젝트별 Slack 채널에 Codex용 요청을 남깁니다.
 - 로컬 데몬은 Slack 메시지를 감지하고 `inbox` 작업 파일로 변환합니다.
 - 데몬은 `outbox` 결과 파일을 Slack 스레드에 구조화된 답장으로 전송합니다.
 - GPT는 Slack 답장을 읽고 사용자에게 다시 전달합니다.
-- 문서 작업은 Codex app의 Notion 커넥터에서 처리하고, 코드 작업은 Git 저장소에서 처리합니다.
+- 프로젝트별 Slack 채널을 분리하고, 문서 작업은 Codex app의 Notion 커넥터에서, 코드 작업은 Git 저장소에서 처리합니다.
 
 ## 현재 범위
 
 - `[to-codex]`, `카를로스에게 전달:`, `카를로스 요청` 접두사가 붙은 Slack 메시지를 새 작업으로 처리합니다.
 - `[to-codex-reply]` 접두사가 붙은 Slack 메시지는 기존 작업의 사용자 답변으로 처리합니다.
 - Slack 스레드 댓글도 처리합니다. 데몬은 `conversations.history`로 부모 메시지를 읽고, `reply_count > 0`인 메시지는 `conversations.replies`로 댓글을 펼칩니다.
+- 프로젝트별 Slack 채널은 [config/projects.json](config/projects.json)에서 관리합니다.
 - 처리한 Slack 메시지 `ts`를 저장해 중복 작업 파일 생성을 막습니다.
 - `inbox`, `outbox`, `outbox/sent`, `state`, `logs` 디렉터리를 필요할 때 만듭니다.
-- 사람이 작성한 `outbox/*.md` 결과 파일만 전송 후보로 봅니다.
+- 사람이 작성한 `outbox/<project_id>/*.md` 결과 파일만 전송 후보로 봅니다.
 - 작성 중인 `outbox/*.pending.md` 파일은 무시합니다.
 - Notion 문서 생성/수정은 Codex app의 Notion 커넥터로 처리합니다. 데몬은 Notion API를 직접 호출하지 않습니다.
 - Codex 자동 실행은 이후 단계입니다.
@@ -31,11 +32,11 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 
 ```text
 GPT
--> Slack #codex-gpt "카를로스에게 전달:"
+-> 프로젝트별 Slack 채널 "카를로스에게 전달:"
 -> CodexGptRelay daemon
--> inbox/task_<task_id>.md 생성
+-> inbox/<project_id>/task_<task_id>.md 생성
 -> Codex app 작업
--> outbox/<result>.md 생성
+-> outbox/<project_id>/<result>.md 생성
 -> CodexGptRelay daemon
 -> logs/relay_events.jsonl 기록
 -> state/processed_messages.json 중복 처리 방지
@@ -57,7 +58,7 @@ Git
 
 ```text
 Codex app
--> outbox/<task_id>.md status: waiting_for_user 또는 needs_user: true
+-> outbox/<project_id>/<task_id>.md status: waiting_for_user 또는 needs_user: true
 -> CodexGptRelay daemon
 -> Slack thread [codex-question]
 -> GPT가 사용자 답변 확인
@@ -81,14 +82,36 @@ Codex app
 
 ```env
 SLACK_BOT_TOKEN=xoxb-your-token-here
-SLACK_CHANNEL_ID=C0B6QN775FA
 POLL_INTERVAL_MS=10000
 SLACK_HISTORY_LIMIT=20
 ```
 
-실제 Slack 토큰은 저장소에 넣지 않습니다. `.env`는 `.gitignore`에 포함되어 있습니다.
+실제 Slack 토큰은 저장소에 넣지 않습니다. `.env`는 `.gitignore`에 포함되어 있습니다. `SLACK_CHANNEL_ID`는 과거 단일 채널 호환용 fallback으로만 사용하고, 새 프로젝트 채널은 `config/projects.json`에 적습니다.
 
-Slack App 권한을 바꾼 뒤에는 워크스페이스에 다시 설치하고, 봇을 `#codex-gpt` 채널에 초대해야 합니다.
+프로젝트별 채널과 작업 위치는 [config/projects.json](config/projects.json)에 둡니다.
+
+```json
+{
+  "defaultProjectId": "codex-gpt-relay",
+  "projects": [
+    {
+      "id": "codex-gpt-relay",
+      "name": "CodexGptRelay",
+      "enabled": true,
+      "slackChannelId": "C0B6QN775FA",
+      "repoPath": "F:\\Antigravity\\CodexGptRelay",
+      "githubUrl": "https://github.com/ConqSpace/CodexGptReply.git",
+      "notion": {
+        "mode": "none"
+      }
+    }
+  ]
+}
+```
+
+`enabled: false`이거나 `slackChannelId`가 비어 있는 프로젝트는 데몬이 폴링하지 않습니다.
+
+Slack App 권한을 바꾼 뒤에는 워크스페이스에 다시 설치하고, 봇을 각 프로젝트 채널에 초대해야 합니다.
 
 ```text
 /invite @봇이름
@@ -106,7 +129,7 @@ node src/relay_daemon.js --once --dry-run
 node src/relay_daemon.js --once
 ```
 
-위 명령은 `[to-codex]` 메시지를 감지하면 `inbox` 작업 파일을 만들고, `outbox/*.md` 결과 파일이 있으면 Slack 스레드에 전송합니다.
+위 명령은 지원 접두사 메시지를 감지하면 `inbox/<project_id>` 작업 파일을 만들고, `outbox/<project_id>/*.md` 결과 파일이 있으면 해당 프로젝트 Slack 스레드에 전송합니다.
 
 ```powershell
 node src/relay_daemon.js
@@ -130,7 +153,7 @@ npm start
 
 ## Slack 요청 예시
 
-Slack `#codex-gpt` 채널에 아래 메시지를 보냅니다.
+프로젝트별 Slack 채널에 아래 메시지를 보냅니다.
 
 기본 권장 포맷:
 
@@ -182,12 +205,13 @@ Request:
 Codex relay 테스트 응답을 보내줘.
 ```
 
-데몬은 `inbox/task_test-001.md` 작업 파일을 만듭니다. 작업 파일에는 채널, 원본 메시지 `ts`, 스레드 `ts`, 작성자, 감지 시각, 원문 요청이 포함됩니다.
+데몬은 `inbox/<project_id>/task_test-001.md` 작업 파일을 만듭니다. 작업 파일에는 프로젝트 ID, 저장소 경로, Notion 대상, 채널, 원본 메시지 `ts`, 스레드 `ts`, 작성자, 감지 시각, 원문 요청이 포함됩니다.
 
-Codex app 또는 사람이 작업을 마친 뒤 `outbox`에는 아래처럼 결과 파일을 작성합니다. 작성 중에는 `.pending.md` 확장자를 사용하고, 완료되면 `.md`로 이름을 바꿉니다.
+Codex app 또는 사람이 작업을 마친 뒤 `outbox/<project_id>`에는 아래처럼 결과 파일을 작성합니다. 작성 중에는 `.pending.md` 확장자를 사용하고, 완료되면 `.md`로 이름을 바꿉니다.
 
 ```text
 task_id: test-001
+project_id: codex-gpt-relay
 status: completed
 needs_user: false
 thread_ts: 1710000000.000000
@@ -200,6 +224,7 @@ frontmatter 형식도 사용할 수 있습니다.
 ```markdown
 ---
 task_id: test-001
+project_id: codex-gpt-relay
 status: completed
 needs_user: false
 thread_ts: "1710000000.000000"
@@ -212,6 +237,7 @@ Slack으로 보낼 결과 본문입니다.
 
 ```text
 task_id: test-001
+project_id: codex-gpt-relay
 needs_user: true
 thread_ts: 1710000000.000000
 message: |
@@ -265,10 +291,10 @@ answer: |
 
 ## 생성되는 로컬 파일
 
-- `inbox/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋게 저장한 작업 파일
-- `outbox/*.md`: Slack 전송 후보 결과 파일
+- `inbox/<project_id>/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋게 저장한 작업 파일
+- `outbox/<project_id>/*.md`: Slack 전송 후보 결과 파일
 - `outbox/*.pending.md`: 작성 중인 결과 파일이며 데몬이 무시합니다.
-- `outbox/sent/*.md`: Slack 전송 성공 뒤 이동된 결과 파일
+- `outbox/sent/<project_id>/*.md`: Slack 전송 성공 뒤 이동된 결과 파일
 - `logs/relay_events.jsonl`: 감지한 요청 메시지, 작업 파일 생성 기록, 사용자 답변 처리 이벤트
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts` 목록
 - `state/posted_results.json`: 이미 전송한 결과 파일 목록
@@ -277,7 +303,7 @@ answer: |
 작업 상태는 다음 흐름으로 기록됩니다.
 
 - `queued`: Slack 요청을 감지해 `inbox` 작업 파일을 만든 상태
-- `outbox_ready`: `outbox/*.md` 결과 파일을 읽어 Slack 전송 후보로 확인한 상태
+- `outbox_ready`: `outbox/<project_id>/*.md` 결과 파일을 읽어 Slack 전송 후보로 확인한 상태
 - `posted`: Slack 스레드 답장 전송과 전송 완료 기록이 끝난 상태
 - `failed`: 결과 파일 형식 오류 등으로 작업 처리가 실패한 상태
 - `waiting_for_user`: Codex app이 사용자 확인 질문을 남긴 상태
@@ -343,7 +369,7 @@ $codex-gpt-relay로 relay 한 번 확인해줘.
 
 - 실제 Codex app 작업 처리는 사람이 수행합니다.
 - Notion 작업은 Codex app 커넥터로 처리합니다. 데몬은 Slack과 파일 큐만 담당합니다.
-- 현재 방식은 Slack `conversations.history`와 `conversations.replies` 폴링입니다. 더 빠른 반응이 필요하면 나중에 Socket Mode 전환을 검토합니다.
+- 현재 방식은 `config/projects.json`의 활성 프로젝트 채널을 순회하며 Slack `conversations.history`와 `conversations.replies`를 폴링합니다. 더 빠른 반응이 필요하면 나중에 Socket Mode 전환을 검토합니다.
 
 ## 검증된 테스트
 

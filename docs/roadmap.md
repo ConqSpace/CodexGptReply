@@ -14,7 +14,7 @@
 
 ## 1단계: Slack 왕복 검증
 
-목표: Slack Web API로 `#codex-gpt`를 읽고 쓸 수 있는지 확인합니다.
+목표: Slack Web API로 프로젝트별 Slack 채널을 읽고 쓸 수 있는지 확인합니다.
 
 구현 항목:
 
@@ -24,8 +24,9 @@
   - `channels:read`
   - `channels:history`
   - `chat:write`
-- Slack `#codex-gpt` 채널 ID를 설정으로 저장합니다.
-- Slack Bot을 `#codex-gpt` 채널에 초대합니다.
+- Slack 프로젝트 채널 ID를 설정으로 저장합니다.
+- 프로젝트별 Slack 채널 ID를 `config/projects.json`에 저장합니다.
+- Slack Bot을 프로젝트 채널에 초대합니다.
 - 채널 최근 메시지를 읽는 스크립트를 만듭니다.
 - `[to-codex]` 메시지만 감지합니다.
 - `카를로스에게 전달:` 같은 사람 친화형 접두사를 감지합니다.
@@ -58,10 +59,10 @@
 구현 항목:
 
 - `inbox`, `outbox`, `state`, `logs` 디렉터리를 만듭니다.
-- `[to-codex]` 메시지를 `inbox/task_<task_id>.md`로 저장합니다.
+- `[to-codex]` 메시지를 `inbox/<project_id>/task_<task_id>.md`로 저장합니다.
 - `logs/relay_events.jsonl`에 `task_created` 이벤트를 남깁니다.
 - 처리한 Slack 메시지 `ts`를 `state/processed_messages.json`에 저장합니다.
-- `outbox/*.md`를 감지해 Slack 스레드에 전송하는 흐름을 만듭니다.
+- `outbox/<project_id>/*.md`를 감지해 Slack 스레드에 전송하는 흐름을 만듭니다.
 
 완료 조건:
 
@@ -284,6 +285,7 @@
 - `inbox` 작업 파일 형식
 - `outbox` 결과 파일 형식
 - Slack API 폴링 주기와 429 대응
+- 프로젝트별 Slack 채널 매핑
 
 나중에 열어둘 것:
 

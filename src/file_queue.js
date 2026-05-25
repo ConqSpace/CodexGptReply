@@ -32,6 +32,12 @@ function ensureRelayDirectories(config) {
   ]) {
     fs.mkdirSync(directoryPath, { recursive: true });
   }
+
+  for (const project of config.projects || []) {
+    fs.mkdirSync(projectInboxDir(config, project.id), { recursive: true });
+    fs.mkdirSync(projectOutboxDir(config, project.id), { recursive: true });
+    fs.mkdirSync(projectSentOutboxDir(config, project.id), { recursive: true });
+  }
 }
 
 function sanitizeId(rawValue) {
@@ -52,13 +58,14 @@ function extractTaskId(text) {
   return sanitizeId(match[2]);
 }
 
-function taskIdFromMessage(message) {
+function taskIdFromMessage(message, project) {
   const explicitTaskId = extractTaskId(message.text || "");
   if (explicitTaskId) {
     return explicitTaskId;
   }
 
-  return sanitizeId(`slack-${message.ts || Date.now()}`);
+  const projectPrefix = project && project.id ? `${project.id}-` : "";
+  return sanitizeId(`${projectPrefix}slack-${message.ts || Date.now()}`);
 }
 
 function stripToCodexPrefix(text) {
@@ -73,14 +80,25 @@ function stripToCodexPrefix(text) {
     .trim();
 }
 
-function buildTaskFileContent({ channelId, message, taskId, detectedAt }) {
+function buildTaskFileContent({ channelId, message, taskId, detectedAt, project }) {
   const threadTs = message.thread_ts || message.ts;
   const author = message.user || message.bot_id || "unknown";
   const request = stripToCodexPrefix(message.text || "");
+  const projectId = project && project.id ? project.id : "default";
+  const projectName = project && project.name ? project.name : projectId;
+  const repoPath = project && project.repoPath ? project.repoPath : "";
+  const githubUrl = project && project.githubUrl ? project.githubUrl : "";
+  const notion = project && project.notion ? project.notion : { mode: "none" };
+  const notionTarget = notion.databaseName || notion.pageName || notion.mode || "none";
 
   return `# Codex 작업 요청
 
 - task_id: ${taskId}
+- project_id: ${projectId}
+- project_name: ${projectName}
+- repo_path: ${repoPath}
+- github_url: ${githubUrl}
+- notion_target: ${notionTarget}
 - channel: ${channelId}
 - message_ts: ${message.ts}
 - thread_ts: ${threadTs}
@@ -93,15 +111,30 @@ ${request}
 `;
 }
 
-function createInboxTaskFile({ config, channelId, message, detectedAt }) {
-  const taskId = taskIdFromMessage(message);
+function projectInboxDir(config, projectId) {
+  return path.join(config.inboxDir, sanitizeId(projectId));
+}
+
+function projectOutboxDir(config, projectId) {
+  return path.join(config.outboxDir, sanitizeId(projectId));
+}
+
+function projectSentOutboxDir(config, projectId) {
+  return path.join(config.sentOutboxDir, sanitizeId(projectId));
+}
+
+function createInboxTaskFile({ config, channelId, message, detectedAt, project }) {
+  const taskId = taskIdFromMessage(message, project);
+  const projectId = project && project.id ? project.id : config.defaultProjectId || "default";
   const fileName = `task_${taskId}.md`;
-  const filePath = path.join(config.inboxDir, fileName);
+  const inboxDir = projectInboxDir(config, projectId);
+  const filePath = path.join(inboxDir, fileName);
   const content = buildTaskFileContent({
     channelId,
     message,
     taskId,
     detectedAt,
+    project,
   });
 
   let created = false;
@@ -234,26 +267,60 @@ function listOutboxCandidates(config) {
     return [];
   }
 
-  return fs
-    .readdirSync(config.outboxDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((fileName) => fileName.endsWith(".md") && !fileName.endsWith(".pending.md"))
-    .sort()
-    .map((fileName) => ({
-      fileName,
-      filePath: path.join(config.outboxDir, fileName),
-    }));
+  const candidates = [];
+  const projects = config.projects && config.projects.length > 0
+    ? config.projects
+    : [{ id: config.defaultProjectId || "default", slackChannelId: config.slackChannelId }];
+  const defaultProject = projects.find((project) => project.id === config.defaultProjectId) || projects[0];
+
+  for (const entry of fs.readdirSync(config.outboxDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.endsWith(".pending.md")) {
+      continue;
+    }
+
+    candidates.push({
+      project: defaultProject,
+      projectId: defaultProject.id,
+      fileName: entry.name,
+      storeKey: `${defaultProject.id}/${entry.name}`,
+      filePath: path.join(config.outboxDir, entry.name),
+    });
+  }
+
+  for (const project of projects) {
+    const outboxDir = projectOutboxDir(config, project.id);
+    if (!fs.existsSync(outboxDir)) {
+      continue;
+    }
+
+    for (const entry of fs.readdirSync(outboxDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.endsWith(".pending.md")) {
+        continue;
+      }
+
+      candidates.push({
+        project,
+        projectId: project.id,
+        fileName: entry.name,
+        storeKey: `${project.id}/${entry.name}`,
+        filePath: path.join(outboxDir, entry.name),
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => left.storeKey.localeCompare(right.storeKey));
 }
 
-function moveResultToSent(config, fileName) {
-  const sourcePath = path.join(config.outboxDir, fileName);
-  let targetPath = path.join(config.sentOutboxDir, fileName);
+function moveResultToSent(config, candidate) {
+  const sourcePath = candidate.filePath;
+  const sentDir = projectSentOutboxDir(config, candidate.projectId || config.defaultProjectId || "default");
+  fs.mkdirSync(sentDir, { recursive: true });
+  let targetPath = path.join(sentDir, candidate.fileName);
 
   if (fs.existsSync(targetPath)) {
-    const parsedPath = path.parse(fileName);
+    const parsedPath = path.parse(candidate.fileName);
     const movedAt = new Date().toISOString().replace(/[^0-9]/g, "");
-    targetPath = path.join(config.sentOutboxDir, `${parsedPath.name}-${movedAt}${parsedPath.ext}`);
+    targetPath = path.join(sentDir, `${parsedPath.name}-${movedAt}${parsedPath.ext}`);
   }
 
   fs.renameSync(sourcePath, targetPath);
@@ -299,12 +366,13 @@ async function processOutboxResults({ config, slackClient, postedStore, taskStor
   let postedCount = 0;
 
   for (const candidate of candidates) {
-    if (postedStore.has(candidate.fileName)) {
+    if (postedStore.has(candidate.storeKey)) {
       continue;
     }
 
     const content = fs.readFileSync(candidate.filePath, "utf8");
     const result = parseResultFileContent(content);
+    result.project_id = result.project_id || candidate.projectId;
 
     try {
       validateResult(result, candidate.fileName);
@@ -330,13 +398,13 @@ async function processOutboxResults({ config, slackClient, postedStore, taskStor
     }
 
     await slackClient.postThreadReply({
-      channelId: config.slackChannelId,
+      channelId: candidate.project.slackChannelId,
       threadTs: result.thread_ts,
       text: slackText,
     });
 
-    postedStore.add(candidate.fileName);
-    moveResultToSent(config, candidate.fileName);
+    postedStore.add(candidate.storeKey);
+    moveResultToSent(config, candidate);
     if (taskStore) {
       taskStore.transition(result.task_id, taskStatusFromResultStatus(result.status), {
         thread_ts: result.thread_ts,
@@ -360,6 +428,9 @@ module.exports = {
   listOutboxCandidates,
   parseResultFileContent,
   processOutboxResults,
+  projectInboxDir,
+  projectOutboxDir,
+  projectSentOutboxDir,
   ResultValidationError,
   sanitizeId,
   taskIdFromMessage,
