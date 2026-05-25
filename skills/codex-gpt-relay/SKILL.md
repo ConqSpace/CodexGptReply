@@ -24,6 +24,7 @@ Slack-facing alias:
 - `task_id` is optional for requests. If omitted, the daemon creates `<project id>-slack-<message ts>`.
 - Project channels are configured in `config/projects.json`; `.env` should keep secrets such as `SLACK_BOT_TOKEN`.
 - Thread replies are supported. The daemon reads channel parents with `conversations.history` and expands parents with replies using `conversations.replies`.
+- Long planning documents can be attached to the Slack thread from `outbox/<project_id>/*.attachment.md` using `attachment_path`.
 
 ## Safety Rules
 
@@ -126,6 +127,7 @@ Checklist:
 - 모든 `outbox` 결과 파일에는 `inbox` 작업 파일의 `thread_ts`를 그대로 복사한다.
 - 결과 파일은 `outbox/<project_id>/<task_id>.pending.md`로 작성하고 최종 전송 시 `.md`로 바꾼다.
 - `outbox` 필수 필드는 `task_id`, `status`, `thread_ts`, `message`이다. 사용자 확인이 필요하면 `needs_user: true`도 적는다.
+- 기획서 원본처럼 긴 문서를 함께 보낼 때는 같은 폴더에 `<task_id>.attachment.md`를 만들고 결과 파일에 `attachment_path`, `attachment_title`, `attachment_comment`를 적는다.
 - 위험하거나 불명확한 작업은 `status: waiting_for_user`와 `needs_user: true`를 사용해 daemon이 `[codex-question]`으로 답하게 한다.
 - 결과가 완성되고 전송해도 안전하다고 판단하기 전에는 최종 `outbox/<project_id>/*.md` 파일을 만들지 않는다.
 - 사용자 답변은 `[to-codex-reply]` 메시지로 들어온다. `task_id`가 없으면 같은 Slack 스레드의 기존 작업을 찾고, Slack 스레드가 기존 작업과 다르면 무시된다.
@@ -179,7 +181,7 @@ Troubleshooting:
 
 - `channel_not_found`: check channel ID typo and whether the bot can see the channel.
 - `not_in_channel`: invite the bot to the project channel.
-- `missing_scope`: add `channels:read`, `channels:history`, `chat:write`, then reinstall the Slack app.
+- `missing_scope`: add `channels:read`, `channels:history`, `chat:write`, `files:write`, then reinstall the Slack app.
 - No inbox file: check `enabled`, `slackChannelId`, daemon restart, prefix, and `state/processed_messages.json`.
 - No Slack reply: check `outbox/<project_id>/`, `thread_ts`, `state/posted_results.json`, and daemon stderr.
 - Thread replies ignored: confirm the parent message has replies and the daemon is using `conversations.replies`.
@@ -280,16 +282,31 @@ The relay should ignore:
 Use this result shape for Slack-ready output:
 
 ```text
-[codex-result]
 task_id: <id if known>
+project_id: <project id>
 status: completed
 needs_user: false
+thread_ts: <Slack thread ts>
 
-summary:
-<short result>
+message: |
+  요약:
+  - <short result>
+```
 
-details:
-- <important detail>
+Use this result shape when attaching a source planning document:
+
+```text
+task_id: <id if known>
+project_id: <project id>
+status: completed
+needs_user: false
+thread_ts: <Slack thread ts>
+attachment_path: <id>.attachment.md
+attachment_title: <document title>
+attachment_comment: 원본 문서를 첨부합니다.
+message: |
+  요청한 문서를 작성했습니다.
+  핵심 요약은 아래와 같고, 전체 원본은 첨부 파일로 확인할 수 있습니다.
 ```
 
 Use this question shape when blocked:

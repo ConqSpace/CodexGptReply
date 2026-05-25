@@ -12,6 +12,7 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 - GPT는 프로젝트별 Slack 채널에 Codex용 요청을 남깁니다.
 - 로컬 데몬은 Slack 메시지를 감지하고 `inbox` 작업 파일로 변환합니다.
 - 데몬은 `outbox` 결과 파일을 Slack 스레드에 구조화된 답장으로 전송합니다.
+- 기획서 같은 긴 원본 문서는 Slack 스레드에 파일로 첨부할 수 있습니다.
 - GPT는 Slack 답장을 읽고 사용자에게 다시 전달합니다.
 - 프로젝트별 Slack 채널을 분리하고, 문서와 코드는 각 프로젝트 Git 저장소에서 처리합니다.
 
@@ -25,6 +26,7 @@ Slack에서 기계형 태그가 안전 검사에 걸릴 때는 사람 이름처�
 - `inbox`, `outbox`, `outbox/sent`, `state`, `logs` 디렉터리를 필요할 때 만듭니다.
 - 사람이 작성한 `outbox/<project_id>/*.md` 결과 파일만 전송 후보로 봅니다.
 - 작성 중인 `outbox/*.pending.md` 파일은 무시합니다.
+- `outbox/<project_id>/*.attachment.md` 원본 문서는 결과 파일로 해석하지 않고 첨부 파일로만 사용합니다.
 - 문서 작업은 프로젝트 저장소의 Markdown 파일에서 처리합니다.
 - Codex 자동 실행은 이후 단계입니다.
 
@@ -77,6 +79,7 @@ Codex app
   - `channels:read`
   - `channels:history`
   - `chat:write`
+  - `files:write`
 
 ## 설정
 
@@ -220,6 +223,22 @@ message: |
   Slack 왕복 검증용 응답입니다.
 ```
 
+기획 문서 원본을 같이 보낼 때는 결과 파일 옆에 `*.attachment.md` 파일을 만들고 `attachment_path`를 적습니다. 상대 경로는 결과 파일이 있는 `outbox/<project_id>` 기준입니다.
+
+```text
+task_id: plan-001
+project_id: codex-gpt-relay
+status: completed
+needs_user: false
+thread_ts: 1710000000.000000
+attachment_path: plan-001.attachment.md
+attachment_title: 메모 앱 기획서 초안
+attachment_comment: 원본 기획서를 첨부합니다.
+message: |
+  기획서 초안을 작성했습니다.
+  핵심 요약은 본문에 적고, 전체 원본은 첨부 파일로 보냅니다.
+```
+
 frontmatter 형식도 사용할 수 있습니다.
 
 ```markdown
@@ -295,6 +314,7 @@ answer: |
 - `inbox/<project_id>/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋게 저장한 작업 파일
 - `outbox/<project_id>/*.md`: Slack 전송 후보 결과 파일
 - `outbox/*.pending.md`: 작성 중인 결과 파일이며 데몬이 무시합니다.
+- `outbox/<project_id>/*.attachment.md`: Slack에 첨부할 원본 문서이며 결과 파일로 해석하지 않습니다.
 - `outbox/sent/<project_id>/*.md`: Slack 전송 성공 뒤 이동된 결과 파일
 - `logs/relay_events.jsonl`: 감지한 요청 메시지, 작업 파일 생성 기록, 사용자 답변 처리 이벤트
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts` 목록
@@ -316,7 +336,7 @@ answer: |
 
 ## 문서
 
-자세한 Slack 권한과 설정 방법은 [docs/slack_setup.md](docs/slack_setup.md)를 참고합니다. 스레드 댓글 조회에는 별도 `replies` 권한이 없고, 공개 채널 기준 `channels:history` 권한을 사용합니다.
+자세한 Slack 권한과 설정 방법은 [docs/slack_setup.md](docs/slack_setup.md)를 참고합니다. 스레드 댓글 조회에는 별도 `replies` 권한이 없고, 공개 채널 기준 `channels:history` 권한을 사용합니다. 원본 문서 첨부에는 `files:write` 권한을 사용합니다.
 
 Codex app에서 `logs/relay_events.jsonl`과 `inbox`를 감시하고 `outbox` 결과 파일을 남기는 운영 절차는 [docs/codex_app_operations.md](docs/codex_app_operations.md)를 참고합니다.
 

@@ -12,6 +12,7 @@
 - 작업 로그와 결정 사항은 프로젝트 저장소의 `docs/` 아래 Markdown 문서에 남깁니다.
 - 결과 파일은 작성 중에는 `outbox/*.pending.md`로 둡니다.
 - 전송 준비가 끝났을 때만 `outbox/<project_id>/*.md`로 이름을 바꿉니다.
+- 기획서 원본처럼 긴 문서는 Slack 본문에 모두 넣지 않고 `*.attachment.md`로 첨부합니다.
 - 위험한 작업은 바로 실행하지 않고 `[codex-question]` 결과로 사용자 확인을 요청합니다.
 
 ## inbox 작업 파일 형식
@@ -75,6 +76,12 @@ outbox/<project_id>/<task_id>.md
 - `thread_ts`: `inbox` 작업 파일의 `thread_ts` 값을 그대로 사용합니다.
 - `message`: Slack에 보낼 본문입니다.
 
+선택 필드:
+
+- `attachment_path`: Slack 스레드에 첨부할 원본 문서 경로입니다. 상대 경로는 결과 파일이 있는 `outbox/<project_id>` 기준입니다.
+- `attachment_title`: Slack에 표시할 첨부 파일 제목입니다.
+- `attachment_comment`: 첨부 파일과 함께 보낼 짧은 안내 문구입니다.
+
 권장 형식:
 
 ```text
@@ -92,6 +99,22 @@ message: |
 
   남은 위험:
   - 사용자가 알아야 할 제한이나 후속 조치를 적습니다.
+```
+
+기획 문서 원본을 첨부할 때는 결과 파일 옆에 `*.attachment.md` 파일을 둡니다. `*.attachment.md`는 결과 전송 후보에서 제외됩니다.
+
+```text
+task_id: <작업 ID>
+project_id: <프로젝트 ID>
+status: completed
+needs_user: false
+thread_ts: <Slack 스레드 ts>
+attachment_path: <작업 ID>.attachment.md
+attachment_title: <문서 제목>
+attachment_comment: 원본 문서를 첨부합니다.
+message: |
+  요청한 기획 문서를 작성했습니다.
+  핵심 요약은 아래와 같고, 전체 원본은 첨부 파일로 확인할 수 있습니다.
 ```
 
 frontmatter 형식도 사용할 수 있습니다.
@@ -225,7 +248,8 @@ daemon은 다음 조건을 모두 만족할 때만 답변을 유효하게 봅니
 6. `message`에 사용자가 바로 이해할 수 있는 요약, 검증, 남은 위험을 적습니다.
 7. 비밀 값과 토큰이 포함되지 않았는지 확인합니다.
 8. 실제 외부 전송 테스트를 하지 않았으면 그 사실을 명확히 적습니다.
-9. 마지막에 `.md`로 이름을 바꿔 전송 후보로 만듭니다.
+9. 원본 문서 첨부가 필요하면 `*.attachment.md` 파일을 같은 폴더에 두고 `attachment_path`를 적습니다.
+10. 마지막에 `.md`로 이름을 바꿔 전송 후보로 만듭니다.
 
 ## 작업 상태 확인
 

@@ -1,3 +1,6 @@
+const fs = require("fs");
+const path = require("path");
+
 const SLACK_API_BASE_URL = "https://slack.com/api";
 
 function sleep(ms) {
@@ -107,6 +110,39 @@ class SlackClient {
       channel: channelId,
       thread_ts: threadTs,
       text,
+    });
+  }
+
+  async uploadFileToThread({ channelId, threadTs, filePath, title, initialComment }) {
+    const fileStats = fs.statSync(filePath);
+    const fileName = path.basename(filePath);
+    const uploadTicket = await this.apiCall("files.getUploadURLExternal", {
+      filename: fileName,
+      length: fileStats.size,
+    });
+
+    const uploadResponse = await fetch(uploadTicket.upload_url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+      },
+      body: fs.readFileSync(filePath),
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Slack 파일 업로드 실패: http_${uploadResponse.status}`);
+    }
+
+    return this.apiCall("files.completeUploadExternal", {
+      channel_id: channelId,
+      thread_ts: threadTs,
+      initial_comment: initialComment || "",
+      files: [
+        {
+          id: uploadTicket.file_id,
+          title: title || fileName,
+        },
+      ],
     });
   }
 }

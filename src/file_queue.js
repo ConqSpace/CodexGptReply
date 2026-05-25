@@ -246,6 +246,36 @@ function validateResult(result, fileName) {
   }
 }
 
+function resolveAttachmentPath(result, candidate) {
+  if (!result.attachment_path) {
+    return "";
+  }
+
+  const rawPath = String(result.attachment_path).trim();
+  if (!rawPath) {
+    return "";
+  }
+
+  if (path.isAbsolute(rawPath)) {
+    return path.normalize(rawPath);
+  }
+
+  return path.normalize(path.join(path.dirname(candidate.filePath), rawPath));
+}
+
+function validateAttachment(result, candidate) {
+  const attachmentPath = resolveAttachmentPath(result, candidate);
+  if (!attachmentPath) {
+    return "";
+  }
+
+  if (!fs.existsSync(attachmentPath) || !fs.statSync(attachmentPath).isFile()) {
+    throw new ResultValidationError(candidate.fileName, ["attachment_path(existing file)"]);
+  }
+
+  return attachmentPath;
+}
+
 function buildSlackResultText(result) {
   const prefix = RESULT_PREFIXES[result.status] || "[codex-result]";
   const needsUser = result.needs_user === true || result.status === "waiting_for_user";
@@ -271,7 +301,12 @@ function listOutboxCandidates(config) {
   const defaultProject = projects.find((project) => project.id === config.defaultProjectId) || projects[0];
 
   for (const entry of fs.readdirSync(config.outboxDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.endsWith(".pending.md")) {
+    if (
+      !entry.isFile() ||
+      !entry.name.endsWith(".md") ||
+      entry.name.endsWith(".pending.md") ||
+      entry.name.endsWith(".attachment.md")
+    ) {
       continue;
     }
 
@@ -291,7 +326,12 @@ function listOutboxCandidates(config) {
     }
 
     for (const entry of fs.readdirSync(outboxDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name.endsWith(".pending.md")) {
+      if (
+        !entry.isFile() ||
+        !entry.name.endsWith(".md") ||
+        entry.name.endsWith(".pending.md") ||
+        entry.name.endsWith(".attachment.md")
+      ) {
         continue;
       }
 
@@ -321,6 +361,28 @@ function moveResultToSent(config, candidate) {
   }
 
   fs.renameSync(sourcePath, targetPath);
+  return targetPath;
+}
+
+function moveAttachmentToSent(config, candidate, attachmentPath) {
+  const candidateDir = path.resolve(path.dirname(candidate.filePath));
+  const resolvedAttachmentPath = path.resolve(attachmentPath);
+  if (path.dirname(resolvedAttachmentPath) !== candidateDir) {
+    return "";
+  }
+
+  const sentDir = projectSentOutboxDir(config, candidate.projectId || config.defaultProjectId || "default");
+  fs.mkdirSync(sentDir, { recursive: true });
+  const attachmentName = path.basename(resolvedAttachmentPath);
+  let targetPath = path.join(sentDir, attachmentName);
+
+  if (fs.existsSync(targetPath)) {
+    const parsedPath = path.parse(attachmentName);
+    const movedAt = new Date().toISOString().replace(/[^0-9]/g, "");
+    targetPath = path.join(sentDir, `${parsedPath.name}-${movedAt}${parsedPath.ext}`);
+  }
+
+  fs.renameSync(resolvedAttachmentPath, targetPath);
   return targetPath;
 }
 
@@ -373,6 +435,7 @@ async function processOutboxResults({ config, slackClient, postedStore, taskStor
 
     try {
       validateResult(result, candidate.fileName);
+      result.attachment_path_resolved = validateAttachment(result, candidate);
     } catch (error) {
       recordOutboxFailure({ taskStore, candidate, result, error });
       continue;
@@ -391,6 +454,9 @@ async function processOutboxResults({ config, slackClient, postedStore, taskStor
 
     if (options.dryRun) {
       console.log(`[dry-run] Slack 결과 전송 예정: file=${candidate.fileName}, thread_ts=${result.thread_ts}`);
+      if (result.attachment_path_resolved) {
+        console.log(`[dry-run] Slack 파일 첨부 예정: file=${path.basename(result.attachment_path_resolved)}`);
+      }
       continue;
     }
 
@@ -400,7 +466,20 @@ async function processOutboxResults({ config, slackClient, postedStore, taskStor
       text: slackText,
     });
 
+    if (result.attachment_path_resolved) {
+      await slackClient.uploadFileToThread({
+        channelId: candidate.project.slackChannelId,
+        threadTs: result.thread_ts,
+        filePath: result.attachment_path_resolved,
+        title: result.attachment_title || path.basename(result.attachment_path_resolved),
+        initialComment: result.attachment_comment || "원본 문서를 첨부합니다.",
+      });
+    }
+
     postedStore.add(candidate.storeKey);
+    if (result.attachment_path_resolved) {
+      moveAttachmentToSent(config, candidate, result.attachment_path_resolved);
+    }
     moveResultToSent(config, candidate);
     if (taskStore) {
       taskStore.transition(result.task_id, taskStatusFromResultStatus(result.status), {

@@ -7,8 +7,11 @@ Slack App의 Bot Token Scopes에 다음 권한을 추가합니다.
 - `channels:read`
 - `channels:history`
 - `chat:write`
+- `files:write`
 
 스레드 댓글 조회에 `replies`라는 별도 권한은 없습니다. 공개 채널에서는 `conversations.replies`도 `channels:history` 권한으로 조회합니다. 비공개 채널, DM, 멀티 DM으로 확장할 때는 각각 `groups:history`, `im:history`, `mpim:history`가 필요합니다.
+
+`files:write`는 결과 원본 문서를 Slack 스레드에 첨부할 때 사용합니다.
 
 권한을 바꾼 뒤에는 Slack App을 워크스페이스에 다시 설치해야 합니다. 그리고 Bot을 각 프로젝트 채널에 초대합니다.
 
@@ -52,6 +55,7 @@ node src/relay_daemon.js
 - `inbox/<project_id>/task_<task_id>.md`: Slack 요청을 사람이 읽기 좋은 작업 파일로 저장합니다.
 - `outbox/<project_id>/*.md`: Slack 스레드에 전송할 결과 파일입니다.
 - `outbox/*.pending.md`: 작성 중인 결과 파일입니다. 데몬은 이 파일을 무시합니다.
+- `outbox/<project_id>/*.attachment.md`: Slack에 첨부할 원본 문서입니다. 데몬은 이 파일을 결과 파일로 해석하지 않습니다.
 - `outbox/sent/*.md`: Slack 전송 성공 뒤 이동된 결과 파일입니다.
 - `logs/relay_events.jsonl`: 감지한 `[to-codex]` 메시지와 `task_created` 이벤트를 줄 단위 JSON으로 저장합니다.
 - `state/processed_messages.json`: 이미 처리한 Slack 메시지 `ts`를 저장해 중복 처리를 막습니다.
@@ -87,6 +91,21 @@ status: completed
 thread_ts: 1710000000.000000
 message: |
   요청한 작업을 완료했습니다.
+```
+
+기획서처럼 원본 문서를 함께 보낼 때는 결과 파일 옆에 `*.attachment.md` 파일을 두고 `attachment_path`를 적습니다. 상대 경로는 결과 파일이 있는 `outbox/<project_id>` 기준입니다.
+
+```text
+project_id: codex-gpt-relay
+task_id: planning-001
+status: completed
+thread_ts: 1710000000.000000
+attachment_path: planning-001.attachment.md
+attachment_title: 메모 앱 기획서 초안
+attachment_comment: 원본 기획서를 첨부합니다.
+message: |
+  기획서 초안을 작성했습니다.
+  요약은 아래와 같고, 원본 문서는 첨부 파일로 확인할 수 있습니다.
 ```
 
 frontmatter를 쓰는 경우 본문을 `message`로 사용할 수 있습니다.
